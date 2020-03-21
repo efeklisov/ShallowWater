@@ -1,0 +1,24 @@
+project (Hova's_Engine)
+cmake_minimum_required (VERSION 3.10)
+
+set (CMAKE_CXX_STANDARD 17)
+
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g" )
+
+find_package (glfw3 3.3 REQUIRED)
+find_package (glm REQUIRED)
+
+include_directories (external external/imgui src external/vulkan/x86_64/include)
+link_directories (external/vulkan/x86_64/lib)
+link_directories(external/vulkan/x86_64/etc/explicit_layer.d)
+
+add_executable (engine src/main.cpp
+    external/imgui/imgui.cpp 
+    external/imgui/imgui_draw.cpp
+    external/imgui/imgui_widgets.cpp
+    external/imgui/imgui_demo.cpp
+    external/imgui/imgui_impl_glfw.cpp
+    external/imgui/imgui_impl_vulkan.cpp)
+
+target_link_libraries (engine vulkan glfw)
+
