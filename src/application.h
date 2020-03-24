@@ -8,7 +8,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/string_cast.hpp>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -39,6 +38,7 @@
 #include "texture.h"
 #include "cubemap.h"
 #include "shader.h"
+#include "mesh.h"
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -94,19 +94,14 @@ class Application {
         VkPipeline skyboxPipeline;
 
         hw::Command* cmd;
-        VkCommandPool imguiCommandPool;
-        std::vector<VkCommandBuffer> imguiCommandBuffers;
+        hw::Command* imguicmd;
 
         VkImage depthImage;
         VkDeviceMemory depthImageMemory;
         VkImageView depthImageView;
 
-        Texture* texture;
-        CubeMap* cubemap;
-
-        float rotationX = 257.0f;
-        float rotationY = 3.0f;
-        float rotationZ = 126.0f;
+        Mesh chalet;
+        Mesh skybox;
 
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
@@ -115,26 +110,9 @@ class Application {
         VkBuffer indexBuffer;
         VkDeviceMemory indexBufferMemory;
 
-        std::vector<Vertex> skyboxVertices;
-        std::vector<uint32_t> skyboxIndices;
-        VkBuffer skyboxVertexBuffer;
-        VkDeviceMemory skyboxVertexBufferMemory;
-        VkBuffer skyboxIndexBuffer;
-        VkDeviceMemory skyboxIndexBufferMemory;
-
-        std::vector<VkBuffer> uniformBuffers;
-        std::vector<VkDeviceMemory> uniformBuffersMemory;
-
-        std::vector<VkBuffer> skyboxUniformBuffers;
-        std::vector<VkDeviceMemory> skyboxUniformBuffersMemory;
-
         VkDescriptorPool descriptorPool;
         VkDescriptorPool imguiDescriptorPool;
 
-        std::vector<VkDescriptorSet> descriptorSets;
-        std::vector<VkDescriptorSet> skyboxDescriptorSets;
-
-        std::vector<VkCommandBuffer> commandBuffers;
         std::vector<VkSemaphore> imageAvailableSemaphores;
         std::vector<VkSemaphore> renderFinishedSemaphores;
         std::vector<VkFence> inFlightFences;
@@ -178,21 +156,60 @@ class Application {
             createDepthResources();
             createFramebuffers();
 
-            /**/texture = new Texture("textures/chalet.jpg");
-            /**/cubemap = new CubeMap("textures/storforsen");
-            /**/read::model("models/chalet.obj", vertices, indices);
-            /**/read::model("models/cube.obj", skyboxVertices, skyboxIndices);
+            /**/chalet.texture = new Texture("textures/chalet.jpg");
+            /**/skybox.texture = new CubeMap("textures/storforsen");
+            /**/read::model("models/cube.obj", vertices, indices, skybox.vertex.start, skybox.vertex.size);
+            /**/read::model("models/chalet.obj", vertices, indices, chalet.vertex.start, chalet.vertex.size);
+
+            std::cout << chalet.vertex.start << ' ' << chalet.vertex.size << std::endl;
+            std::cout << skybox.vertex.start << ' ' << skybox.vertex.size << std::endl;
+
             /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
             /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
-            /**/create::vertexBuffer(skyboxVertices, skyboxVertexBuffer, skyboxVertexBufferMemory);
-            /**/create::indexBuffer(skyboxIndices, skyboxIndexBuffer, skyboxIndexBufferMemory);
 
             createUniformBuffers();
             createDescriptorPool();
-            createDescriptorSets();
-            createCommandBuffers();
+            allocateDescriptorSets();
+            bindUnisToDescriptorSets();
+
+            cmd->createCommandBuffers(swapChainImages.size());
+            recordCommandBuffers();
 
             /**/createSyncObjects();
+        }
+
+        void initImgui() {
+            IMGUI_CHECKVERSION();
+            ImGui::CreateContext();
+            ImGuiIO& io = ImGui::GetIO(); (void)io;
+            ImGui::StyleColorsDark();
+
+            createImguiDescriptorPool();
+            createImguiRenderPass();
+            createImguiFramebuffers();
+
+            hw::QueueFamilyIndices queueFamilyIndices = device->findQueueFamilies();
+
+            ImGui_ImplGlfw_InitForVulkan(window, true);
+            ImGui_ImplVulkan_InitInfo info = {};
+            info.Instance = instance->get();
+            info.PhysicalDevice = device->getPhysical();
+            info.Device = device->getLogical();
+            info.QueueFamily = queueFamilyIndices.graphicsFamily.value();
+            info.Queue = device->getGraphicsQueue();
+            info.PipelineCache = VK_NULL_HANDLE;
+            info.DescriptorPool = imguiDescriptorPool;
+            info.Allocator = VK_NULL_HANDLE;
+            info.MinImageCount = swapChainImages.size();
+            info.ImageCount = swapChainImages.size();
+            info.CheckVkResultFn = checkVKresult;
+            ImGui_ImplVulkan_Init(&info, imguiRenderPass);
+
+            cmd->customSingleCommand(ImGui_ImplVulkan_CreateFontsTexture);
+            ImGui_ImplVulkan_DestroyFontUploadObjects();
+
+            imguicmd = new hw::Command(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+            imguicmd->createCommandBuffers(swapChainImages.size());
         }
 
         void mainLoop() {
@@ -217,9 +234,8 @@ class Application {
                 device->destroy(framebuffer);
             }
 
-            device->free(cmd->get(), static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
-            device->free(imguiCommandPool, static_cast<uint32_t>(imguiCommandBuffers.size()), imguiCommandBuffers.data());
-            device->destroy(imguiCommandPool);
+            cmd->freeCommandBuffers();
+            imguicmd->freeCommandBuffers();
 
             device->destroy(graphicsPipeline);
             device->destroy(skyboxPipeline);
@@ -234,13 +250,8 @@ class Application {
 
             device->destroy(swapChain);
 
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
-                device->destroy(uniformBuffers[i]);
-                device->free(uniformBuffersMemory[i]);
-
-                device->destroy(skyboxUniformBuffers[i]);
-                device->free(skyboxUniformBuffersMemory[i]);
-            }
+            chalet.free();
+            skybox.free();
 
             device->destroy(descriptorPool);
         }
@@ -256,12 +267,6 @@ class Application {
             device->destroy(vertexBuffer);
             device->free(vertexBufferMemory);
 
-            device->destroy(skyboxIndexBuffer);
-            device->free(skyboxIndexBufferMemory);
-
-            device->destroy(skyboxVertexBuffer);
-            device->free(skyboxVertexBufferMemory);
-
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
                 device->destroy(renderFinishedSemaphores[i]);
                 device->destroy(imageAvailableSemaphores[i]);
@@ -273,9 +278,10 @@ class Application {
             ImGui::DestroyContext();
 
             device->destroy(imguiDescriptorPool);
+            delete imguicmd;
 
-            delete cubemap;
-            delete texture;
+            delete skybox.texture;
+            delete chalet.texture;
             delete cmd;
             delete device;
             delete surface;
@@ -306,61 +312,16 @@ class Application {
             createFramebuffers();
             createUniformBuffers();
             createDescriptorPool();
-            createDescriptorSets();
-            createCommandBuffers();
+            allocateDescriptorSets();
+            bindUnisToDescriptorSets();
+
+            cmd->createCommandBuffers(swapChainImages.size());
+            recordCommandBuffers();
 
             createImguiRenderPass();
             createImguiFramebuffers();
-            createImguiCommandPool();
-        }
 
-        void initImgui() {
-            IMGUI_CHECKVERSION();
-            ImGui::CreateContext();
-            ImGuiIO& io = ImGui::GetIO(); (void)io;
-            ImGui::StyleColorsDark();
-
-            createImguiDescriptorPool();
-            createImguiRenderPass();
-            createImguiFramebuffers();
-
-            ImGui_ImplGlfw_InitForVulkan(window, true);
-            ImGui_ImplVulkan_InitInfo info = {};
-            info.Instance = instance->get();
-            info.PhysicalDevice = device->getPhysical();
-            info.Device = device->getLogical();
-            info.QueueFamily = device->getGraphicsIndex();
-            info.Queue = device->getGraphicsQueue();
-            info.PipelineCache = VK_NULL_HANDLE;
-            info.DescriptorPool = imguiDescriptorPool;
-            info.Allocator = VK_NULL_HANDLE;
-            info.MinImageCount = swapChainImages.size();
-            info.ImageCount = swapChainImages.size();
-            info.CheckVkResultFn = checkVKresult;
-            ImGui_ImplVulkan_Init(&info, imguiRenderPass);
-
-            VkCommandBuffer command_buffer = cmd->beginSingleTimeCommands();
-            ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
-            cmd->endSingleTimeCommands(command_buffer);
-            ImGui_ImplVulkan_DestroyFontUploadObjects();
-
-            createImguiCommandPool();
-        }
-
-        void createImguiCommandPool() {
-            VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-            commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            commandPoolCreateInfo.queueFamilyIndex = device->getGraphicsIndex();
-            commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            device->create(commandPoolCreateInfo, imguiCommandPool);
-
-            imguiCommandBuffers.resize(swapChainImages.size());
-            VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-            commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            commandBufferAllocateInfo.commandPool = imguiCommandPool;
-            commandBufferAllocateInfo.commandBufferCount = static_cast<uint32_t>(imguiCommandBuffers.size());
-            device->allocate(commandBufferAllocateInfo, imguiCommandBuffers.data());
+            imguicmd->createCommandBuffers(swapChainImages.size());
         }
 
         void createImguiFramebuffers() {
@@ -454,7 +415,7 @@ class Application {
         }
 
         void createSwapChain() {
-            hw::SwapChainSupportDetails swapChainSupport = device->querySwapChainSupport();
+            auto swapChainSupport = device->querySwapChainSupport();
 
             VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
             VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
@@ -476,7 +437,7 @@ class Application {
             createInfo.imageArrayLayers = 1;
             createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-            hw::QueueFamilyIndices indices = device->findQueueFamilies();
+            auto indices = device->findQueueFamilies();
             uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
             if (indices.graphicsFamily != indices.presentFamily) {
@@ -502,6 +463,46 @@ class Application {
             swapChainExtent = extent;
         }
 
+        VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+            for (const auto& availableFormat : availableFormats) {
+                if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                    return availableFormat;
+                }
+            }
+
+            return availableFormats[0];
+        }
+
+        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+            for (const auto& availablePresentMode : availablePresentModes) {
+                if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                    return availablePresentMode;
+                }
+            }
+
+            return VK_PRESENT_MODE_FIFO_KHR;
+        }
+
+        VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
+            if (capabilities.currentExtent.width != UINT32_MAX) {
+                return capabilities.currentExtent;
+            } else {
+                int width, height;
+                glfwGetFramebufferSize(window, &width, &height);
+
+                VkExtent2D actualExtent = {
+                    static_cast<uint32_t>(width),
+                    static_cast<uint32_t>(height)
+                };
+
+                actualExtent.width = std::max(capabilities.minImageExtent.width,
+                        std::min(capabilities.maxImageExtent.width, actualExtent.width));
+                actualExtent.height = std::max(capabilities.minImageExtent.height,
+                        std::min(capabilities.maxImageExtent.height, actualExtent.height));
+
+                return actualExtent;
+            }
+        }
         void createImageViews() {
             swapChainImageViews.resize(swapChainImages.size());
 
@@ -657,7 +658,7 @@ class Application {
             depthStencil.stencilTestEnable = VK_FALSE;
 
             VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
-            colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
+            colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                 VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
             colorBlendAttachment.blendEnable = VK_FALSE;
 
@@ -672,10 +673,14 @@ class Application {
             colorBlending.blendConstants[2] = 0.0f;
             colorBlending.blendConstants[3] = 0.0f;
 
+            std::vector<VkDescriptorSetLayout> layouts = {
+                descriptorSetLayout
+            };
+
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
             pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-            pipelineLayoutInfo.setLayoutCount = 1;
-            pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+            pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
+            pipelineLayoutInfo.pSetLayouts = layouts.data();
 
             device->create(pipelineLayoutInfo, pipelineLayout);
 
@@ -751,20 +756,20 @@ class Application {
         void createUniformBuffers() {
             VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-            uniformBuffers.resize(swapChainImages.size());
-            uniformBuffersMemory.resize(swapChainImages.size());
+            chalet.uniform.buffers.resize(swapChainImages.size());
+            chalet.uniform.memory.resize(swapChainImages.size());
 
             for (size_t i = 0; i < swapChainImages.size(); i++) {
                 create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, chalet.uniform.buffers[i], chalet.uniform.memory[i]);
             }
 
-            skyboxUniformBuffers.resize(swapChainImages.size());
-            skyboxUniformBuffersMemory.resize(swapChainImages.size());
+            skybox.uniform.buffers.resize(swapChainImages.size());
+            skybox.uniform.memory.resize(swapChainImages.size());
 
             for (size_t i = 0; i < swapChainImages.size(); i++) {
                 create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, skyboxUniformBuffers[i], skyboxUniformBuffersMemory[i]);
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, skybox.uniform.buffers[i], skybox.uniform.memory[i]);
             }
         }
 
@@ -784,35 +789,38 @@ class Application {
             device->create(poolInfo, descriptorPool);
         }
 
-        void createDescriptorSets() {
+        void allocateDescriptorSets() {
             std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout);
+
             VkDescriptorSetAllocateInfo allocInfo = {};
             allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
             allocInfo.descriptorPool = descriptorPool;
             allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
             allocInfo.pSetLayouts = layouts.data();
 
-            descriptorSets.resize(swapChainImages.size());
-            device->allocate(allocInfo, descriptorSets.data());
+            chalet.descriptor.sets.resize(swapChainImages.size());
+            device->allocate(allocInfo, chalet.descriptor.sets.data());
 
-            skyboxDescriptorSets.resize(swapChainImages.size());
-            device->allocate(allocInfo, skyboxDescriptorSets.data());
+            skybox.descriptor.sets.resize(swapChainImages.size());
+            device->allocate(allocInfo, skybox.descriptor.sets.data());
+        }
 
+        void bindUnisToDescriptorSets() {
             for (size_t i = 0; i < swapChainImages.size(); i++) {
                 VkDescriptorBufferInfo bufferInfo = {};
-                bufferInfo.buffer = uniformBuffers[i];
+                bufferInfo.buffer = chalet.uniform.buffers[i];
                 bufferInfo.offset = 0;
                 bufferInfo.range = sizeof(UniformBufferObject);
 
                 VkDescriptorImageInfo imageInfo = {};
                 imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = texture->view();
-                imageInfo.sampler = texture->sampler();
+                imageInfo.imageView = chalet.texture->view();
+                imageInfo.sampler = chalet.texture->sampler();
 
                 std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
                 descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[0].dstSet = descriptorSets[i];
+                descriptorWrites[0].dstSet = chalet.descriptor.sets[i];
                 descriptorWrites[0].dstBinding = 0;
                 descriptorWrites[0].dstArrayElement = 0;
                 descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -820,7 +828,7 @@ class Application {
                 descriptorWrites[0].pBufferInfo = &bufferInfo;
 
                 descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[1].dstSet = descriptorSets[i];
+                descriptorWrites[1].dstSet = chalet.descriptor.sets[i];
                 descriptorWrites[1].dstBinding = 1;
                 descriptorWrites[1].dstArrayElement = 0;
                 descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -829,34 +837,24 @@ class Application {
 
                 device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
 
-                descriptorWrites[0].dstSet = skyboxDescriptorSets[i];
-                descriptorWrites[1].dstSet = skyboxDescriptorSets[i];
+                descriptorWrites[0].dstSet = skybox.descriptor.sets[i];
+                descriptorWrites[1].dstSet = skybox.descriptor.sets[i];
 
-                bufferInfo.buffer = skyboxUniformBuffers[i];
+                bufferInfo.buffer = skybox.uniform.buffers[i];
 
-                imageInfo.imageView = cubemap->view();
-                imageInfo.sampler = cubemap->sampler();
+                imageInfo.imageView = skybox.texture->view();
+                imageInfo.sampler = skybox.texture->sampler();
 
                 device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
             }
         }
 
-        void createCommandBuffers() {
-            commandBuffers.resize(swapChainFramebuffers.size());
-
-            VkCommandBufferAllocateInfo allocInfo = {};
-            allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            allocInfo.commandPool = cmd->get();
-            allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
-
-            device->allocate(allocInfo, commandBuffers.data());
-
-            for (size_t i = 0; i < commandBuffers.size(); i++) {
+        void recordCommandBuffers() {
+            for (size_t i = 0; i < swapChainImages.size(); i++) {
                 VkCommandBufferBeginInfo beginInfo = {};
                 beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-                if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+                if (vkBeginCommandBuffer(cmd->get(i), &beginInfo) != VK_SUCCESS) {
                     throw std::runtime_error("failed to begin recording command buffer!");
                 }
 
@@ -874,29 +872,59 @@ class Application {
                 renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
                 renderPassInfo.pClearValues = clearValues.data();
 
-                vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBeginRenderPass(cmd->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
                 VkDeviceSize offsets[] = {0};
 
-                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, 1, &skyboxDescriptorSets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &skyboxVertexBuffer, offsets);
-                vkCmdBindIndexBuffer(commandBuffers[i], skyboxIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxPipeline);
-                vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(skyboxIndices.size()), 1, 0, 0, 0);
+                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout, 0, 1, &skybox.descriptor.sets[i], 0, nullptr);
+                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxPipeline);
+                vkCmdDrawIndexed(cmd->get(i), skybox.vertex.size, 1, 0, skybox.vertex.start, 0);
 
-                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-                vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout, 0, 1, &chalet.descriptor.sets[i], 0, nullptr);
+                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+                vkCmdDrawIndexed(cmd->get(i), chalet.vertex.size, 1, 0, chalet.vertex.start, 0);
 
-                vkCmdEndRenderPass(commandBuffers[i]);
+                vkCmdEndRenderPass(cmd->get(i));
 
-                if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) {
+                if (vkEndCommandBuffer(cmd->get(i)) != VK_SUCCESS) {
                     throw std::runtime_error("failed to record command buffer!");
                 }
+            }
+        }
+
+        void imguiRecordCommandBuffer(uint32_t imageIndex) {
+            VkCommandBufferBeginInfo info = {};
+            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            if (vkBeginCommandBuffer(imguicmd->get(imageIndex), &info) != VK_SUCCESS) {
+                throw std::runtime_error("failed to begin imgui command buffer");
+            }
+
+            VkRenderPassBeginInfo beginInfo = {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            beginInfo.renderPass = imguiRenderPass;
+            beginInfo.framebuffer = imguiFramebuffers[imageIndex];
+            beginInfo.renderArea.extent.width = swapChainExtent.width;
+            beginInfo.renderArea.extent.height = swapChainExtent.height;
+
+            VkClearValue clearValue;
+            clearValue.color = {1.0f, 1.0f, 1.0f, 1.0f};
+
+            beginInfo.clearValueCount = 1;
+            beginInfo.pClearValues = &clearValue;
+            vkCmdBeginRenderPass(imguicmd->get(imageIndex), &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), imguicmd->get(imageIndex));
+
+            vkCmdEndRenderPass(imguicmd->get(imageIndex));
+            if (vkEndCommandBuffer(imguicmd->get(imageIndex)) != VK_SUCCESS) {
+                throw std::runtime_error("failed to end imgui command buffer");
             }
         }
 
@@ -933,9 +961,9 @@ class Application {
             ubo.proj[1][1] *= -1;
 
             void* data;
-            device->map(uniformBuffersMemory[currentImage], sizeof(ubo), data);
+            device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data);
             /**/memcpy(data, &ubo, sizeof(ubo));
-            device->unmap(uniformBuffersMemory[currentImage]);
+            device->unmap(chalet.uniform.memory[currentImage]);
 
             // Skybox
             ubo.proj = glm::perspective(glm::radians(60.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.001f, 256.0f);
@@ -944,14 +972,14 @@ class Application {
             ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
             ubo.model = glm::mat4(1.0f);
             ubo.model = glm::translate(ubo.model, glm::vec3(0, 0, 0));
-            ubo.model = glm::rotate(ubo.model, glm::radians(rotationZ), glm::vec3(0.0f, 0.0f, 1.0f));
-            ubo.model = glm::rotate(ubo.model, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));
-            ubo.model = glm::rotate(ubo.model, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));
+            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.x), glm::vec3(0.0f, 0.0f, 1.0f));
+            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.z), glm::vec3(1.0f, 0.0f, 0.0f));
 
             void* skyboxData;
-            device->map(skyboxUniformBuffersMemory[currentImage], sizeof(ubo), skyboxData);
+            device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData);
             /**/memcpy(skyboxData, &ubo, sizeof(ubo));
-            device->unmap(skyboxUniformBuffersMemory[currentImage]);
+            device->unmap(skybox.uniform.memory[currentImage]);
         }
 
         void drawFrame() {
@@ -960,9 +988,9 @@ class Application {
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
             ImGui::Text("Skybox rotation");
-            ImGui::SliderFloat("X", &rotationX, 0.0f, 360.0f);
-            ImGui::SliderFloat("Y", &rotationY, 0.0f, 360.0f);
-            ImGui::SliderFloat("Z", &rotationZ, 0.0f, 360.0f);
+            ImGui::SliderFloat("X", &skybox.rotation.x, 0.0f, 360.0f);
+            ImGui::SliderFloat("Y", &skybox.rotation.y, 0.0f, 360.0f);
+            ImGui::SliderFloat("Z", &skybox.rotation.z, 0.0f, 360.0f);
             ImGui::Render();
 
             device->waitFence(inFlightFences[currentFrame]);
@@ -987,38 +1015,12 @@ class Application {
             imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
             // Render IMGUI
-            VkCommandBufferBeginInfo info = {};
-            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            if (vkBeginCommandBuffer(imguiCommandBuffers[imageIndex], &info) != VK_SUCCESS) {
-                throw std::runtime_error("failed to begin imgui command buffer");
-            }
-
-            VkRenderPassBeginInfo beginInfo = {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            beginInfo.renderPass = imguiRenderPass;
-            beginInfo.framebuffer = imguiFramebuffers[imageIndex];
-            beginInfo.renderArea.extent.width = swapChainExtent.width;
-            beginInfo.renderArea.extent.height = swapChainExtent.height;
-
-            VkClearValue clearValue;
-            clearValue.color = {1.0f, 1.0f, 1.0f, 1.0f};
-
-            beginInfo.clearValueCount = 1;
-            beginInfo.pClearValues = &clearValue;
-            vkCmdBeginRenderPass(imguiCommandBuffers[imageIndex], &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), imguiCommandBuffers[imageIndex]);
-
-            vkCmdEndRenderPass(imguiCommandBuffers[imageIndex]);
-            if (vkEndCommandBuffer(imguiCommandBuffers[imageIndex]) != VK_SUCCESS) {
-                throw std::runtime_error("failed to end imgui command buffer");
-            }
+            imguiRecordCommandBuffer(imageIndex);
 
             // Submit
             std::array<VkCommandBuffer, 2> submitCommandBuffers = {
-                commandBuffers[imageIndex],
-                imguiCommandBuffers[imageIndex]
+                cmd->get(imageIndex),
+                imguicmd->get(imageIndex)
             };
 
             VkSubmitInfo submitInfo = {};
@@ -1065,44 +1067,5 @@ class Application {
             }
 
             currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-        }
-
-        VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-            for (const auto& availableFormat : availableFormats) {
-                if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                    return availableFormat;
-                }
-            }
-
-            return availableFormats[0];
-        }
-
-        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-            for (const auto& availablePresentMode : availablePresentModes) {
-                if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                    return availablePresentMode;
-                }
-            }
-
-            return VK_PRESENT_MODE_FIFO_KHR;
-        }
-
-        VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-            if (capabilities.currentExtent.width != UINT32_MAX) {
-                return capabilities.currentExtent;
-            } else {
-                int width, height;
-                glfwGetFramebufferSize(window, &width, &height);
-
-                VkExtent2D actualExtent = {
-                    static_cast<uint32_t>(width),
-                    static_cast<uint32_t>(height)
-                };
-
-                actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
-                actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
-
-                return actualExtent;
-            }
         }
 };

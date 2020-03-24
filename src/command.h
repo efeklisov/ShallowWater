@@ -9,12 +9,14 @@
 namespace hw {
     class Command {
         public:
-            Command() {
+            Command(uint32_t flags=0) {
                 hw::QueueFamilyIndices queueFamilyIndices = DevLoc::device()->findQueueFamilies();
 
                 VkCommandPoolCreateInfo poolInfo = {};
                 poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
                 poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+                if (flags != 0)
+                    poolInfo.flags = flags;
 
                 DevLoc::device()->create(poolInfo, commandPool);
             }
@@ -23,8 +25,8 @@ namespace hw {
                 DevLoc::device()->destroy(commandPool);
             }
 
-            VkCommandPool& get() {
-                return commandPool;
+            VkCommandBuffer& get(uint32_t index) {
+                return commandBuffers[index];
             }
 
             void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, int layerCount=1) {
@@ -107,6 +109,30 @@ namespace hw {
                 endSingleTimeCommands(commandBuffer);
             }
 
+
+            void createCommandBuffers(uint32_t size) {
+                commandBuffers.resize(size);
+
+                VkCommandBufferAllocateInfo allocInfo = {};
+                allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                allocInfo.commandPool = commandPool;
+                allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
+
+                DevLoc::device()->allocate(allocInfo, commandBuffers.data());
+            }
+
+            void freeCommandBuffers() {
+                DevLoc::device()->free(commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+            }
+
+            void customSingleCommand(bool func(VkCommandBuffer)) {
+                VkCommandBuffer command_buffer = beginSingleTimeCommands();
+                func(command_buffer);
+                endSingleTimeCommands(command_buffer);
+            }
+
+        private:
             VkCommandBuffer beginSingleTimeCommands() {
                 VkCommandBufferAllocateInfo allocInfo = {};
                 allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -140,7 +166,7 @@ namespace hw {
                 DevLoc::device()->free(commandPool, 1, &commandBuffer);
             }
 
-        private:
             VkCommandPool commandPool;
+            std::vector<VkCommandBuffer> commandBuffers;
     };
 }

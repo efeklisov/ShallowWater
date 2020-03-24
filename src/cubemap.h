@@ -7,7 +7,7 @@
 #include "create.h"
 #include "image.h"
 
-class CubeMap {
+class CubeMap : public Image {
     public:
         CubeMap(std::string filename) {
             createImage(filename);

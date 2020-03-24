@@ -51,6 +51,7 @@ namespace hw {
                     throw std::runtime_error("failed to find a suitable GPU!");
                 }
 
+                QueueFamilyIndices indices;
                 indices = findQueueFamilies(physicalDevice);
 
                 VkPhysicalDeviceProperties info;
@@ -114,10 +115,6 @@ namespace hw {
 
             VkQueue& getGraphicsQueue() {
                 return graphicsQueue;
-            }
-
-            uint32_t getGraphicsIndex() {
-                return indices.graphicsFamily.value();
             }
 
             void get(VkSwapchainKHR& swapchain, uint32_t& imageCount, VkImage* data) {
@@ -463,7 +460,6 @@ namespace hw {
 
             VkQueue graphicsQueue;
             VkQueue presentQueue;
-            QueueFamilyIndices indices;
 
             bool isDeviceSuitable(VkPhysicalDevice _physicalDevice) {
                 QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);

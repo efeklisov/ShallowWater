@@ -3,14 +3,18 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
+#include <glm/gtx/string_cast.hpp>
+
 #include <vector>
 #include <unordered_map>
 #include <string_view>
+#include <iostream>
 
 #include "vertex.h"
 
 namespace read {
-    void model(std::string_view filename, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+    void model(std::string_view filename, std::vector<Vertex>& vertices, 
+            std::vector<uint32_t>& indices) {
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
@@ -32,13 +36,10 @@ namespace read {
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
 
-                if (attrib.texcoords.empty())
-                    vertex.texCoord = {0, 0};
-                else
-                    vertex.texCoord = {
-                        attrib.texcoords[2 * index.texcoord_index + 0],
-                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                    };
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
 
                 vertex.color = {1.0f, 1.0f, 1.0f};
 
@@ -50,6 +51,21 @@ namespace read {
                 indices.push_back(uniqueVertices[vertex]);
             }
         }
+    }
+
+    void model(std::string_view filename, std::vector<Vertex>& vertices,
+            std::vector<uint32_t>& indices, uint32_t& start, uint32_t& size) {
+
+        std::vector<Vertex> _vertices;
+        std::vector<uint32_t> _indices;
+
+        model(filename, _vertices, _indices);
+
+        size = _indices.size();
+        start = vertices.size();
+
+        vertices.insert(vertices.end(), _vertices.begin(), _vertices.end());
+        indices.insert(indices.end(), _indices.begin(), _indices.end());
     }
 
     std::vector<char> file(std::string_view filename) {
