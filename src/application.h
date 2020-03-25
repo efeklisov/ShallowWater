@@ -95,13 +95,15 @@ class Application {
         float deltaTime = 0.0f;
         float lastFrame = 0.0f;
 
-        float yaw = -90.0f;
+        float yaw = 0.0f;
         float pitch = 0.0f;
+        float roll = glm::pi<float>() / 2;
 
-        glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
-        glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-        glm::vec3 cameraUp = glm::vec3(0.0f, -1.0f,  0.0f);
-        glm::vec3 cameraRight = glm::normalize(glm::cross(cameraFront, cameraUp));
+        glm::mat4 view;
+        glm::mat4 proj;
+        glm::quat camera = glm::quat(glm::vec3(pitch, yaw, roll));
+
+        glm::vec3 cameraPos = glm::vec3(0.0f, 0.5f, 3.0f);
 
         VkPipelineLayout pipelineLayout;
 
@@ -169,17 +171,17 @@ class Application {
             app->lastX = xpos;
             app->lastY = ypos;
 
-            const float sensitivity = 0.05f;
+            const float sensitivity = 0.5f;
             xoffset *= sensitivity;
             yoffset *= sensitivity;
 
-            app->yaw -= xoffset;
-            app->pitch += yoffset;
+            app->yaw += xoffset * app->deltaTime;
+            app->pitch += yoffset * app->deltaTime;
 
-            if(app->pitch > 89.0f)
-                app->pitch =  89.0f;
-            if(app->pitch < -89.0f)
-                app->pitch = -89.0f;
+            /* if(app->pitch > 89.0f) */
+            /*     app->pitch =  89.0f; */
+            /* if(app->pitch < -89.0f) */
+            /*     app->pitch = -89.0f; */
         }
 
         void initVulkan() {
@@ -998,33 +1000,51 @@ class Application {
             deltaTime = currentFrame - lastFrame;
             lastFrame = currentFrame;
 
-            glm::vec3 direction;
-            direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-            direction.y = sin(glm::radians(pitch));
-            direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-            cameraFront = glm::normalize(direction);
+            /* glm::vec3 direction; */
+            /* direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch)); */
+            /* direction.y = sin(glm::radians(pitch)); */
+            /* direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch)); */
+            /* cameraFront = glm::normalize(direction); */
 
-            cameraRight = glm::normalize(glm::cross(cameraFront, cameraUp));
-            cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront));
+            /* cameraRight = glm::normalize(glm::cross(cameraFront, cameraUp)); */
+            /* cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront)); */
+
+            glm::vec3 cameraRight = glm::vec3(view[0][0], view[1][0], view[2][0]);
+            glm::vec3 cameraUp = glm::vec3(view[0][1], view[1][1], view[2][1]);
+            glm::vec3 cameraFront = glm::vec3(view[0][2], view[1][2], view[2][2]);
+            glm::vec3 absoluteUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
             const float cameraSpeed = 2.5f * deltaTime;
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-                cameraPos += cameraSpeed * cameraFront;
-            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
                 cameraPos -= cameraSpeed * cameraFront;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+                cameraPos += cameraSpeed * cameraFront;
             if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
                 cameraPos -= cameraRight * cameraSpeed;
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
                 cameraPos += cameraRight * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+                roll -= cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+                roll += cameraSpeed;
             if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
-                cameraPos -= cameraUp * cameraSpeed;
+                cameraPos += absoluteUp * cameraSpeed;
             if (glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS)
-                cameraPos += cameraUp * cameraSpeed;
+                cameraPos -= absoluteUp * cameraSpeed;
         }
 
         void updateUniformBuffer(uint32_t currentImage) {
-            glm::mat4 view = (glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp));
-            glm::mat4 proj = glm::perspective(glm::radians(fov), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 100.0f);
+            glm::quat quat = glm::quat(glm::vec3(pitch, yaw, roll));
+            pitch = yaw = roll = 0;
+
+            camera = quat * camera;
+            camera = glm::normalize(camera);
+            glm::mat4 rotate = glm::mat4_cast(camera);
+
+            view = rotate * glm::translate(glm::mat4(1.0f), -cameraPos);
+
+            /* glm::mat4 view = (glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp)); */
+            proj = glm::perspective(glm::radians(fov), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 100.0f);
 
             static auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -1077,8 +1097,8 @@ class Application {
                 throw std::runtime_error("failed to acquire swap chain image!");
             }
 
-            processInput(window);
             updateUniformBuffer(imageIndex);
+            processInput(window);
 
             // Sync
             if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
