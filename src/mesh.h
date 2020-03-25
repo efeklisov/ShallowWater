@@ -10,10 +10,6 @@
 struct Mesh {
     Image* texture;
 
-    glm::vec3 transform;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-
     struct VertexBufferInfo {
         uint32_t start;
         uint32_t size;

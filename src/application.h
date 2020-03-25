@@ -88,6 +88,21 @@ class Application {
 
         VkDescriptorSetLayout descriptorSetLayout;
 
+        float fov = 90.0f;
+        float firstMouse = true;
+        float lastX = WIDTH / 2, lastY = HEIGHT / 2;
+
+        float deltaTime = 0.0f;
+        float lastFrame = 0.0f;
+
+        float yaw = -90.0f;
+        float pitch = 0.0f;
+
+        glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
+        glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+        glm::vec3 cameraUp = glm::vec3(0.0f, -1.0f,  0.0f);
+        glm::vec3 cameraRight = glm::normalize(glm::cross(cameraFront, cameraUp));
+
         VkPipelineLayout pipelineLayout;
 
         VkPipeline graphicsPipeline;
@@ -129,11 +144,42 @@ class Application {
             window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
             glfwSetWindowUserPointer(window, this);
             glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            glfwSetCursorPosCallback(window, mouse_callback);
         }
 
         static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
             auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
             app->framebufferResized = true;
+        }
+
+        static void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+            auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+            if(app->firstMouse)
+            {
+                app->lastX = xpos;
+                app->lastY = ypos;
+                app->firstMouse = false;
+            }
+
+            float xoffset = xpos - app->lastX;
+            float yoffset = app->lastY - ypos;
+            app->lastX = xpos;
+            app->lastY = ypos;
+
+            const float sensitivity = 0.05f;
+            xoffset *= sensitivity;
+            yoffset *= sensitivity;
+
+            app->yaw -= xoffset;
+            app->pitch += yoffset;
+
+            if(app->pitch > 89.0f)
+                app->pitch =  89.0f;
+            if(app->pitch < -89.0f)
+                app->pitch = -89.0f;
         }
 
         void initVulkan() {
@@ -160,9 +206,6 @@ class Application {
             /**/skybox.texture = new CubeMap("textures/storforsen");
             /**/read::model("models/cube.obj", vertices, indices, skybox.vertex.start, skybox.vertex.size);
             /**/read::model("models/chalet.obj", vertices, indices, chalet.vertex.start, chalet.vertex.size);
-
-            std::cout << chalet.vertex.start << ' ' << chalet.vertex.size << std::endl;
-            std::cout << skybox.vertex.start << ' ' << skybox.vertex.size << std::endl;
 
             /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
             /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
@@ -705,6 +748,8 @@ class Application {
             shaderStages[0] = vertBase.info();
             shaderStages[1] = fragBase.info();
 
+            rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
+
             depthStencil.depthWriteEnable = VK_TRUE;
             depthStencil.depthTestEnable = VK_TRUE;
 
@@ -948,38 +993,64 @@ class Application {
             }
         }
 
+        void processInput(GLFWwindow *window) {
+            float currentFrame = glfwGetTime();
+            deltaTime = currentFrame - lastFrame;
+            lastFrame = currentFrame;
+
+            glm::vec3 direction;
+            direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+            direction.y = sin(glm::radians(pitch));
+            direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+            cameraFront = glm::normalize(direction);
+
+            cameraRight = glm::normalize(glm::cross(cameraFront, cameraUp));
+            cameraUp = glm::normalize(glm::cross(cameraRight, cameraFront));
+
+            const float cameraSpeed = 2.5f * deltaTime;
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+                cameraPos += cameraSpeed * cameraFront;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+                cameraPos -= cameraSpeed * cameraFront;
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+                cameraPos -= cameraRight * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+                cameraPos += cameraRight * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                cameraPos -= cameraUp * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS)
+                cameraPos += cameraUp * cameraSpeed;
+        }
+
         void updateUniformBuffer(uint32_t currentImage) {
+            glm::mat4 view = (glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp));
+            glm::mat4 proj = glm::perspective(glm::radians(fov), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 100.0f);
+
             static auto startTime = std::chrono::high_resolution_clock::now();
 
             auto currentTime = std::chrono::high_resolution_clock::now();
             float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+            // Skybox
             UniformBufferObject ubo = {};
-            ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
-            ubo.proj[1][1] *= -1;
+            ubo.view = view;
+            ubo.proj = proj;
+            ubo.model = glm::translate(glm::mat4(1.0f), cameraPos);
+
+            void* skyboxData;
+            device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData);
+            /**/memcpy(skyboxData, &ubo, sizeof(ubo));
+            device->unmap(skybox.uniform.memory[currentImage]);
+
+            // Chalet
+            ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
             void* data;
             device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data);
             /**/memcpy(data, &ubo, sizeof(ubo));
             device->unmap(chalet.uniform.memory[currentImage]);
 
-            // Skybox
-            ubo.proj = glm::perspective(glm::radians(60.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.001f, 256.0f);
-
-            /* ubo.view = glm::mat4(1.0f); */
-            ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            ubo.model = glm::mat4(1.0f);
-            ubo.model = glm::translate(ubo.model, glm::vec3(0, 0, 0));
-            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.x), glm::vec3(0.0f, 0.0f, 1.0f));
-            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-            ubo.model = glm::rotate(ubo.model, glm::radians(skybox.rotation.z), glm::vec3(1.0f, 0.0f, 0.0f));
-
-            void* skyboxData;
-            device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData);
-            /**/memcpy(skyboxData, &ubo, sizeof(ubo));
-            device->unmap(skybox.uniform.memory[currentImage]);
         }
 
         void drawFrame() {
@@ -988,9 +1059,9 @@ class Application {
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
             ImGui::Text("Skybox rotation");
-            ImGui::SliderFloat("X", &skybox.rotation.x, 0.0f, 360.0f);
-            ImGui::SliderFloat("Y", &skybox.rotation.y, 0.0f, 360.0f);
-            ImGui::SliderFloat("Z", &skybox.rotation.z, 0.0f, 360.0f);
+            /* ImGui::SliderFloat("X", &skybox.rotation.x, 0.0f, 360.0f); */
+            /* ImGui::SliderFloat("Y", &skybox.rotation.y, 0.0f, 360.0f); */
+            /* ImGui::SliderFloat("Z", &skybox.rotation.z, 0.0f, 360.0f); */
             ImGui::Render();
 
             device->waitFence(inFlightFences[currentFrame]);
@@ -1006,6 +1077,7 @@ class Application {
                 throw std::runtime_error("failed to acquire swap chain image!");
             }
 
+            processInput(window);
             updateUniformBuffer(imageIndex);
 
             // Sync
