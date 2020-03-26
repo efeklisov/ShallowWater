@@ -20,7 +20,7 @@ class Camera {
         void update(float _deltaTime) {
             deltaTime = _deltaTime;
             int _width, _height;
-            glfwGetWindowSize(window, &_width, &_height);
+            glfwGetFramebufferSize(window, &_width, &_height);
 
             glm::quat quat = glm::quat(glm::vec3(pitch, yaw, roll));
             pitch = yaw = roll = 0;

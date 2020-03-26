@@ -109,6 +109,7 @@ class Application {
 
         Mesh chalet;
         Mesh skybox;
+        Mesh terrain;
 
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
@@ -174,8 +175,14 @@ class Application {
 
             /**/chalet.texture = new Texture("textures/chalet.jpg");
             /**/skybox.texture = new CubeMap("textures/storforsen");
+            /**/terrain.texture = new Texture("textures/lake.png");
             /**/read::model("models/cube.obj", vertices, indices, skybox.vertex.start, skybox.vertex.size);
             /**/read::model("models/chalet.obj", vertices, indices, chalet.vertex.start, chalet.vertex.size);
+            /**/read::model("models/lake.obj", vertices, indices, terrain.vertex.start, terrain.vertex.size);
+
+            std::cout << "Cube >> start: " << skybox.vertex.start << " size: " << skybox.vertex.size << std::endl;
+            std::cout << "Chalet >> start: " << chalet.vertex.start << " size: " << chalet.vertex.size << std::endl;
+            std::cout << "Lake >> start: " << terrain.vertex.start << " size: " << terrain.vertex.size << std::endl;
 
             /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
             /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
@@ -272,6 +279,7 @@ class Application {
 
             chalet.free();
             skybox.free();
+            terrain.free();
 
             device->destroy(descriptorPool);
         }
@@ -302,6 +310,7 @@ class Application {
 
             delete skybox.texture;
             delete chalet.texture;
+            delete terrain.texture;
             delete cmd;
             delete device;
             delete surface;
@@ -794,20 +803,28 @@ class Application {
                 create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, skybox.uniform.buffers[i], skybox.uniform.memory[i]);
             }
+
+            terrain.uniform.buffers.resize(swapChainImages.size());
+            terrain.uniform.memory.resize(swapChainImages.size());
+
+            for (size_t i = 0; i < swapChainImages.size(); i++) {
+                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, terrain.uniform.buffers[i], terrain.uniform.memory[i]);
+            }
         }
 
         void createDescriptorPool() {
             std::array<VkDescriptorPoolSize, 2> poolSizes = {};
             poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 2);
+            poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 3);
             poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 2);
+            poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 3);
 
             VkDescriptorPoolCreateInfo poolInfo = {};
             poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
             poolInfo.pPoolSizes = poolSizes.data();
-            poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size() * 2);
+            poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size() * 3);
 
             device->create(poolInfo, descriptorPool);
         }
@@ -826,6 +843,9 @@ class Application {
 
             skybox.descriptor.sets.resize(swapChainImages.size());
             device->allocate(allocInfo, skybox.descriptor.sets.data());
+
+            terrain.descriptor.sets.resize(swapChainImages.size());
+            device->allocate(allocInfo, terrain.descriptor.sets.data());
         }
 
         void bindUnisToDescriptorSets() {
@@ -857,6 +877,16 @@ class Application {
                 descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 descriptorWrites[1].descriptorCount = 1;
                 descriptorWrites[1].pImageInfo = &imageInfo;
+
+                device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+
+                descriptorWrites[0].dstSet = terrain.descriptor.sets[i];
+                descriptorWrites[1].dstSet = terrain.descriptor.sets[i];
+
+                bufferInfo.buffer = terrain.uniform.buffers[i];
+
+                imageInfo.imageView = terrain.texture->view();
+                imageInfo.sampler = terrain.texture->sampler();
 
                 device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
 
@@ -912,6 +942,13 @@ class Application {
                 vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
                 vkCmdDrawIndexed(cmd->get(i), chalet.vertex.size, 1, 0, chalet.vertex.start, 0);
+
+                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout, 0, 1, &terrain.descriptor.sets[i], 0, nullptr);
+                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+                vkCmdDrawIndexed(cmd->get(i), terrain.vertex.size, 1, 0, terrain.vertex.start, 0);
 
                 vkCmdEndRenderPass(cmd->get(i));
 
@@ -990,13 +1027,22 @@ class Application {
 
             // Chalet
             ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-            ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            /* ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); */
+            /* ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, 0.0f, 5.0f)); */
+            ubo.model = glm::translate(ubo.model, glm::vec3(-4.3177f, -4.7955f, 1.8368f));
 
             void* data;
             device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data);
             /**/memcpy(data, &ubo, sizeof(ubo));
             device->unmap(chalet.uniform.memory[currentImage]);
 
+            // Terrain
+            ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+
+            void* terrainData;
+            device->map(terrain.uniform.memory[currentImage], sizeof(ubo), terrainData);
+            /**/memcpy(terrainData, &ubo, sizeof(ubo));
+            device->unmap(terrain.uniform.memory[currentImage]);
         }
 
         void drawFrame() {
