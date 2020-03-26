@@ -40,6 +40,7 @@
 #include "shader.h"
 #include "mesh.h"
 #include "camera.h"
+#include "vertexloc.h"
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -107,12 +108,11 @@ class Application {
         VkDeviceMemory depthImageMemory;
         VkImageView depthImageView;
 
-        Mesh chalet;
-        Mesh skybox;
-        Mesh terrain;
+        std::vector<Mesh> meshes;
 
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
+
         VkBuffer vertexBuffer;
         VkDeviceMemory vertexBufferMemory;
         VkBuffer indexBuffer;
@@ -158,31 +158,26 @@ class Application {
             surface = new hw::Surface(&instance->get(), window);
             device = new hw::Device(enableValidationLayers, &instance->get(), &surface->get());
             DevLoc::provide(device);
+            VertexLoc::provide(vertices);
+            VertexLoc::provide(indices);
+
+            /**/cmd = new hw::Command();
+            CmdLoc::provide(cmd);
+
+            /**/meshes.push_back(Mesh("Skybox", "models/cube.obj", new CubeMap("textures/storforsen")));
+            /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", new Texture("textures/chalet.jpg"),
+                        glm::vec3(-4.3177f, -4.7955f, 1.8368f), glm::vec3(-90.0f, 0.0f, 0.0f)));
+            /**/meshes.push_back(Mesh("Lake", "models/lake.obj", new Texture("textures/lake.png")));
 
             createSwapChain();
             createImageViews();
             createRenderPass();
 
             /**/createDescriptorSetLayout();
-
             createPipelines();
-
-            /**/cmd = new hw::Command();
-            CmdLoc::provide(cmd);
 
             createDepthResources();
             createFramebuffers();
-
-            /**/chalet.texture = new Texture("textures/chalet.jpg");
-            /**/skybox.texture = new CubeMap("textures/storforsen");
-            /**/terrain.texture = new Texture("textures/lake.png");
-            /**/read::model("models/cube.obj", vertices, indices, skybox.vertex.start, skybox.vertex.size);
-            /**/read::model("models/chalet.obj", vertices, indices, chalet.vertex.start, chalet.vertex.size);
-            /**/read::model("models/lake.obj", vertices, indices, terrain.vertex.start, terrain.vertex.size);
-
-            std::cout << "Cube >> start: " << skybox.vertex.start << " size: " << skybox.vertex.size << std::endl;
-            std::cout << "Chalet >> start: " << chalet.vertex.start << " size: " << chalet.vertex.size << std::endl;
-            std::cout << "Lake >> start: " << terrain.vertex.start << " size: " << terrain.vertex.size << std::endl;
 
             /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
             /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
@@ -277,9 +272,8 @@ class Application {
 
             device->destroy(swapChain);
 
-            chalet.free();
-            skybox.free();
-            terrain.free();
+            for (auto& mesh: meshes)
+                mesh.free();
 
             device->destroy(descriptorPool);
         }
@@ -308,9 +302,9 @@ class Application {
             device->destroy(imguiDescriptorPool);
             delete imguicmd;
 
-            delete skybox.texture;
-            delete chalet.texture;
-            delete terrain.texture;
+            for (auto& mesh: meshes)
+                delete mesh.texture;
+
             delete cmd;
             delete device;
             delete surface;
@@ -619,6 +613,9 @@ class Application {
             layoutInfo.pBindings = bindings.data();
 
             device->create(layoutInfo, descriptorSetLayout);
+
+            for (auto& mesh: meshes)
+                mesh.descriptor.layout = & descriptorSetLayout;
         }
 
         void createPipelines() {
@@ -741,6 +738,12 @@ class Application {
             depthStencil.depthTestEnable = VK_TRUE;
 
             device->create(pipelineInfo, graphicsPipeline);
+
+            for (auto& mesh: meshes)
+                if (mesh.tag != "Skybox")
+                    mesh.pipeline = &graphicsPipeline;
+                else
+                    meshes[0].pipeline = &skyboxPipeline;
         }
 
         void createFramebuffers() {
@@ -788,82 +791,60 @@ class Application {
         void createUniformBuffers() {
             VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-            chalet.uniform.buffers.resize(swapChainImages.size());
-            chalet.uniform.memory.resize(swapChainImages.size());
+            for (auto& mesh: meshes) {
+                mesh.uniform.buffers.resize(swapChainImages.size());
+                mesh.uniform.memory.resize(swapChainImages.size());
 
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
-                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, chalet.uniform.buffers[i], chalet.uniform.memory[i]);
-            }
-
-            skybox.uniform.buffers.resize(swapChainImages.size());
-            skybox.uniform.memory.resize(swapChainImages.size());
-
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
-                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, skybox.uniform.buffers[i], skybox.uniform.memory[i]);
-            }
-
-            terrain.uniform.buffers.resize(swapChainImages.size());
-            terrain.uniform.memory.resize(swapChainImages.size());
-
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
-                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, terrain.uniform.buffers[i], terrain.uniform.memory[i]);
+                for (size_t i = 0; i < swapChainImages.size(); i++) {
+                    create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                            | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
+                }
             }
         }
 
         void createDescriptorPool() {
             std::array<VkDescriptorPoolSize, 2> poolSizes = {};
             poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 3);
+            poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
             poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * 3);
+            poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
 
             VkDescriptorPoolCreateInfo poolInfo = {};
             poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
             poolInfo.pPoolSizes = poolSizes.data();
-            poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size() * 3);
+            poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
 
             device->create(poolInfo, descriptorPool);
         }
 
         void allocateDescriptorSets() {
-            std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout);
+            for (auto& mesh: meshes) {
+                std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), *mesh.descriptor.layout);
 
-            VkDescriptorSetAllocateInfo allocInfo = {};
-            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool = descriptorPool;
-            allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
-            allocInfo.pSetLayouts = layouts.data();
+                VkDescriptorSetAllocateInfo allocInfo = {};
+                allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                allocInfo.descriptorPool = descriptorPool;
+                allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
+                allocInfo.pSetLayouts = layouts.data();
 
-            chalet.descriptor.sets.resize(swapChainImages.size());
-            device->allocate(allocInfo, chalet.descriptor.sets.data());
-
-            skybox.descriptor.sets.resize(swapChainImages.size());
-            device->allocate(allocInfo, skybox.descriptor.sets.data());
-
-            terrain.descriptor.sets.resize(swapChainImages.size());
-            device->allocate(allocInfo, terrain.descriptor.sets.data());
+                mesh.descriptor.sets.resize(swapChainImages.size());
+                device->allocate(allocInfo, mesh.descriptor.sets.data());
+            }
         }
 
         void bindUnisToDescriptorSets() {
             for (size_t i = 0; i < swapChainImages.size(); i++) {
                 VkDescriptorBufferInfo bufferInfo = {};
-                bufferInfo.buffer = chalet.uniform.buffers[i];
                 bufferInfo.offset = 0;
                 bufferInfo.range = sizeof(UniformBufferObject);
 
                 VkDescriptorImageInfo imageInfo = {};
                 imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = chalet.texture->view();
-                imageInfo.sampler = chalet.texture->sampler();
 
                 std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
                 descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[0].dstSet = chalet.descriptor.sets[i];
                 descriptorWrites[0].dstBinding = 0;
                 descriptorWrites[0].dstArrayElement = 0;
                 descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -871,34 +852,23 @@ class Application {
                 descriptorWrites[0].pBufferInfo = &bufferInfo;
 
                 descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[1].dstSet = chalet.descriptor.sets[i];
                 descriptorWrites[1].dstBinding = 1;
                 descriptorWrites[1].dstArrayElement = 0;
                 descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 descriptorWrites[1].descriptorCount = 1;
                 descriptorWrites[1].pImageInfo = &imageInfo;
 
-                device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                for (auto& mesh: meshes) {
+                    descriptorWrites[0].dstSet = mesh.descriptor.sets[i];
+                    descriptorWrites[1].dstSet = mesh.descriptor.sets[i];
 
-                descriptorWrites[0].dstSet = terrain.descriptor.sets[i];
-                descriptorWrites[1].dstSet = terrain.descriptor.sets[i];
+                    bufferInfo.buffer = mesh.uniform.buffers[i];
 
-                bufferInfo.buffer = terrain.uniform.buffers[i];
+                    imageInfo.imageView = mesh.texture->view();
+                    imageInfo.sampler = mesh.texture->sampler();
 
-                imageInfo.imageView = terrain.texture->view();
-                imageInfo.sampler = terrain.texture->sampler();
-
-                device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
-
-                descriptorWrites[0].dstSet = skybox.descriptor.sets[i];
-                descriptorWrites[1].dstSet = skybox.descriptor.sets[i];
-
-                bufferInfo.buffer = skybox.uniform.buffers[i];
-
-                imageInfo.imageView = skybox.texture->view();
-                imageInfo.sampler = skybox.texture->sampler();
-
-                device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                    device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                }
             }
         }
 
@@ -929,26 +899,14 @@ class Application {
 
                 VkDeviceSize offsets[] = {0};
 
-                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, 1, &skybox.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, skyboxPipeline);
-                vkCmdDrawIndexed(cmd->get(i), skybox.vertex.size, 1, 0, skybox.vertex.start, 0);
-
-                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, 1, &chalet.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-                vkCmdDrawIndexed(cmd->get(i), chalet.vertex.size, 1, 0, chalet.vertex.start, 0);
-
-                vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, 1, &terrain.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-                vkCmdDrawIndexed(cmd->get(i), terrain.vertex.size, 1, 0, terrain.vertex.start, 0);
+                for (auto& mesh: meshes) {
+                    vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                    vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
+                    vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
+                    vkCmdDrawIndexed(cmd->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                }
 
                 vkCmdEndRenderPass(cmd->get(i));
 
@@ -1009,40 +967,59 @@ class Application {
         }
 
         void updateUniformBuffer(uint32_t currentImage) {
-            static auto startTime = std::chrono::high_resolution_clock::now();
-
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-            // Skybox
             UniformBufferObject ubo = {};
             ubo.view = camera->view;
             ubo.proj = camera->proj;
-            ubo.model = glm::translate(glm::mat4(1.0f), camera->cameraPos);
 
-            void* skyboxData;
-            device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData);
-            /**/memcpy(skyboxData, &ubo, sizeof(ubo));
-            device->unmap(skybox.uniform.memory[currentImage]);
+            for (auto& mesh: meshes) {
+                ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(mesh.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+                ubo.model = glm::rotate(ubo.model, glm::radians(mesh.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+                ubo.model = glm::rotate(ubo.model, glm::radians(mesh.rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
 
-            // Chalet
-            ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-            /* ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); */
-            /* ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, 0.0f, 5.0f)); */
-            ubo.model = glm::translate(ubo.model, glm::vec3(-4.3177f, -4.7955f, 1.8368f));
+                if (mesh.tag != "Skybox")
+                    ubo.model = glm::translate(ubo.model, mesh.transform);
+                else ubo.model = glm::translate(ubo.model, camera->cameraPos);
 
-            void* data;
-            device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data);
-            /**/memcpy(data, &ubo, sizeof(ubo));
-            device->unmap(chalet.uniform.memory[currentImage]);
+                void* data;
+                device->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
+                memcpy(data, &ubo, sizeof(ubo));
+                device->unmap(mesh.uniform.memory[currentImage]);
+            }
 
-            // Terrain
-            ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+            /* static auto startTime = std::chrono::high_resolution_clock::now(); */
 
-            void* terrainData;
-            device->map(terrain.uniform.memory[currentImage], sizeof(ubo), terrainData);
-            /**/memcpy(terrainData, &ubo, sizeof(ubo));
-            device->unmap(terrain.uniform.memory[currentImage]);
+            /* auto currentTime = std::chrono::high_resolution_clock::now(); */
+            /* float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count(); */
+
+            /*// Skybox */
+            /*UniformBufferObject ubo = {}; */
+            /*ubo.view = camera->view; */
+            /*ubo.proj = camera->proj; */
+            /*ubo.model = glm::translate(glm::mat4(1.0f), camera->cameraPos); */
+
+            /*void* skyboxData; */
+            /*device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData); */
+            /*memcpy(skyboxData, &ubo, sizeof(ubo)); */
+            /*device->unmap(skybox.uniform.memory[currentImage]); */
+
+            /*// Chalet */
+            /*ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); */
+            /*/1* ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); *1/ */
+            /*/1* ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, 0.0f, 5.0f)); *1/ */
+            /*ubo.model = glm::translate(ubo.model, glm::vec3(-4.3177f, -4.7955f, 1.8368f)); */
+
+            /*void* data; */
+            /*device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data); */
+            /*memcpy(data, &ubo, sizeof(ubo)); */
+            /*device->unmap(chalet.uniform.memory[currentImage]); */
+
+            /*// Terrain */
+            /*ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f)); */
+
+            /*void* terrainData; */
+            /*device->map(terrain.uniform.memory[currentImage], sizeof(ubo), terrainData); */
+            /*memcpy(terrainData, &ubo, sizeof(ubo)); */
+            /*device->unmap(terrain.uniform.memory[currentImage]); */
         }
 
         void drawFrame() {
