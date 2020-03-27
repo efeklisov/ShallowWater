@@ -164,10 +164,10 @@ class Application {
             /**/cmd = new hw::Command();
             CmdLoc::provide(cmd);
 
-            /**/meshes.push_back(Mesh("Skybox", "models/cube.obj", new CubeMap("textures/storforsen")));
-            /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", new Texture("textures/chalet.jpg"),
-                        glm::vec3(-4.3177f, -4.7955f, 1.8368f), glm::vec3(-90.0f, 0.0f, 0.0f)));
-            /**/meshes.push_back(Mesh("Lake", "models/lake.obj", new Texture("textures/lake.png")));
+            /**/meshes.push_back(Mesh("Skybox", "models/cube.obj", std::make_unique<CubeMap>("textures/storforsen")));
+            /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
+                        glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
+            /**/meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
 
             createSwapChain();
             createImageViews();
@@ -302,9 +302,7 @@ class Application {
             device->destroy(imguiDescriptorPool);
             delete imguicmd;
 
-            for (auto& mesh: meshes)
-                delete mesh.texture;
-
+            meshes.clear();
             delete cmd;
             delete device;
             delete surface;
@@ -732,8 +730,6 @@ class Application {
             shaderStages[0] = vertBase.info();
             shaderStages[1] = fragBase.info();
 
-            rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
-
             depthStencil.depthWriteEnable = VK_TRUE;
             depthStencil.depthTestEnable = VK_TRUE;
 
@@ -968,17 +964,22 @@ class Application {
 
         void updateUniformBuffer(uint32_t currentImage) {
             UniformBufferObject ubo = {};
-            ubo.view = camera->view;
-            ubo.proj = camera->proj;
+            /* ubo.view = camera->view; */
 
             for (auto& mesh: meshes) {
-                ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(mesh.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-                ubo.model = glm::rotate(ubo.model, glm::radians(mesh.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-                ubo.model = glm::rotate(ubo.model, glm::radians(mesh.rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+                ubo.proj = camera->proj;
+                glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh.rotation)));
 
-                if (mesh.tag != "Skybox")
-                    ubo.model = glm::translate(ubo.model, mesh.transform);
-                else ubo.model = glm::translate(ubo.model, camera->cameraPos);
+                if (mesh.tag != "Skybox") {
+                    ubo.view = glm::translate(camera->view, mesh.transform);
+                } else ubo.view = glm::translate(camera->view, camera->cameraPos);
+                ubo.model = rotation * glm::mat4(1.0f);
+
+                if (mesh.tag != "Skybox") {
+                    glm::vec3 scale = mesh.scale;
+                    scale.x *= -1;
+                    ubo.model = glm::scale(ubo.model, scale);
+                } else ubo.model = glm::scale(ubo.model, mesh.scale);
 
                 void* data;
                 device->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);

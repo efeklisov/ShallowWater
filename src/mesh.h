@@ -12,21 +12,24 @@
 #include "vertexloc.h"
 
 struct Mesh {
-    Mesh(std::string_view _tag, std::string_view model, Image* _texture,
+    Mesh(std::string_view _tag, std::string_view model, std::unique_ptr<Image> _texture,
             glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
-            glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f))
-    : tag(_tag.data()), texture(_texture), transform(_transform), rotation(_rotation) {
+            glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3 _scale=glm::vec3(1.0f, 1.0f, 1.0f))
+    : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
 
+        texture = std::move(_texture);
         read::model(model.data(), VertexLoc::vertices(), VertexLoc::indices(), vertex.start, vertex.size);
     }
 
     std::string tag;
 
-    Image* texture;
+    std::unique_ptr<Image> texture;
     VkPipeline* pipeline;
 
     glm::vec3 transform;
     glm::vec3 rotation;
+    glm::vec3 scale;
 
     struct VertexBufferInfo {
         uint32_t start;

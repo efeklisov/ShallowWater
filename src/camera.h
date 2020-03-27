@@ -80,7 +80,7 @@ class Camera {
 
         glm::mat4 view;
         glm::mat4 proj;
-        glm::vec3 cameraPos = glm::vec3(0.0f, 0.5f, 3.0f);
+        glm::vec3 cameraPos = glm::vec3(4.0f, 4.f, 7.0f);
 
     private:
         GLFWwindow *window;
