@@ -1,66 +1,34 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
-#include <GLFW/glfw3.h>
 
-#include <iostream>
-
+#include "surloc.h"
 #include "devloc.h"
-#include "surface.h"
 #include "create.h"
 
 namespace hw {
     class SwapChain {
         public:
-            SwapChain(GLFWwindow* _window, VkSurfaceKHR* _surface)
-                : window(_window), surface(_surface) {
-                    createSwapChain();
-                    createImageViews();
-                    createDepthResources();
-                    createRenderPass();
-                    createFramebuffers();
-                }
+            SwapChain(GLFWwindow* _window) : window(_window) {
+                createSwapChain();
+                createSwapChainImageViews();
+                createSwapChainDepthResources();
+            }
 
             ~SwapChain() {
                 DevLoc::device()->destroy(depthImageView);
                 DevLoc::device()->destroy(depthImage);
                 DevLoc::device()->free(depthImageMemory);
 
-                for (auto framebuffer : swapChainFramebuffers) {
-                    DevLoc::device()->destroy(framebuffer);
-                }
-
                 for (auto imageView : swapChainImageViews) {
                     DevLoc::device()->destroy(imageView);
                 }
 
-                DevLoc::device()->destroy(renderPass);
                 DevLoc::device()->destroy(swapChain);
-
             }
 
-            VkSwapchainKHR& get() {
-                return swapChain;
-            }
-
-            VkImageView& getImageView(uint32_t index) {
-                return swapChainImageViews[index];
-            }
-
-            VkFormat& getImageFormat() {
-                return swapChainImageFormat;
-            }
-
-            VkFramebuffer& getFrameBuffer(uint32_t index) {
-                return swapChainFramebuffers[index];
-            }
-
-            VkExtent2D& getExtent() {
-                return swapChainExtent;
-            }
-
-            VkRenderPass& getRenderPass() {
-                return renderPass;
+            uint32_t size() {
+                return swapChainImages.size();
             }
 
             uint32_t width() {
@@ -71,8 +39,28 @@ namespace hw {
                 return swapChainExtent.height;
             }
 
-            uint32_t size() {
-                return swapChainImages.size();
+            VkSwapchainKHR& get() {
+                return swapChain;
+            }
+
+            VkFormat& format() {
+                return swapChainImageFormat;
+            }
+
+            VkImage& image(uint32_t index) {
+                return swapChainImages[index];
+            }
+
+            VkImageView& view(uint32_t index) {
+                return swapChainImageViews[index];
+            }
+
+            VkImageView& depthView() {
+                return depthImageView;
+            }
+
+            VkExtent2D& extent() {
+                return swapChainExtent;
             }
 
             VkFormat findDepthFormat() {
@@ -85,20 +73,15 @@ namespace hw {
 
         private:
             GLFWwindow* window;
-            VkSurfaceKHR* surface;
+            VkSwapchainKHR swapChain;
+            std::vector<VkImage> swapChainImages;
+            VkExtent2D swapChainExtent;
+            VkFormat swapChainImageFormat;
+            std::vector<VkImageView> swapChainImageViews;
 
             VkImage depthImage;
             VkDeviceMemory depthImageMemory;
             VkImageView depthImageView;
-
-            VkRenderPass renderPass;
-
-            VkSwapchainKHR swapChain;
-            std::vector<VkImage> swapChainImages;
-            VkFormat swapChainImageFormat;
-            VkExtent2D swapChainExtent;
-            std::vector<VkImageView> swapChainImageViews;
-            std::vector<VkFramebuffer> swapChainFramebuffers;
 
             void createSwapChain() {
                 auto swapChainSupport = DevLoc::device()->querySwapChainSupport();
@@ -114,7 +97,7 @@ namespace hw {
 
                 VkSwapchainCreateInfoKHR createInfo = {};
                 createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-                createInfo.surface = *surface;
+                createInfo.surface = SurLoc::surface()->get();
 
                 createInfo.minImageCount = imageCount;
                 createInfo.imageFormat = surfaceFormat.format;
@@ -149,104 +132,9 @@ namespace hw {
                 swapChainExtent = extent;
             }
 
-            void createImageViews() {
-                swapChainImageViews.resize(swapChainImages.size());
-
-                for (uint32_t i = 0; i < swapChainImages.size(); i++) {
-                    swapChainImageViews[i] = create::imageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
-                }
-            }
-
-            void createDepthResources() {
-                VkFormat depthFormat = findDepthFormat();
-
-                create::image(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL,
-                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-                depthImageView = create::imageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-            }
-
-            void createFramebuffers() {
-                swapChainFramebuffers.resize(swapChainImageViews.size());
-
-                for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-                    std::array<VkImageView, 2> attachments = {
-                        swapChainImageViews[i],
-                        depthImageView
-                    };
-
-                    VkFramebufferCreateInfo framebufferInfo = {};
-                    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-                    framebufferInfo.renderPass = renderPass;
-                    framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-                    framebufferInfo.pAttachments = attachments.data();
-                    framebufferInfo.width = swapChainExtent.width;
-                    framebufferInfo.height = swapChainExtent.height;
-                    framebufferInfo.layers = 1;
-
-                    DevLoc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
-                }
-            }
-
-            void createRenderPass() {
-                VkAttachmentDescription colorAttachment = {};
-                colorAttachment.format = getImageFormat();
-                colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-                colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-                VkAttachmentDescription depthAttachment = {};
-                depthAttachment.format = findDepthFormat();
-                depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-                depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-                VkAttachmentReference colorAttachmentRef = {};
-                colorAttachmentRef.attachment = 0;
-                colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-                VkAttachmentReference depthAttachmentRef = {};
-                depthAttachmentRef.attachment = 1;
-                depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-                VkSubpassDescription subpass = {};
-                subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-                subpass.colorAttachmentCount = 1;
-                subpass.pColorAttachments = &colorAttachmentRef;
-                subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-                VkSubpassDependency dependency = {};
-                dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-                dependency.dstSubpass = 0;
-                dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-                dependency.srcAccessMask = 0;
-                dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-                dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-                std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
-                VkRenderPassCreateInfo renderPassInfo = {};
-                renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-                renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-                renderPassInfo.pAttachments = attachments.data();
-                renderPassInfo.subpassCount = 1;
-                renderPassInfo.pSubpasses = &subpass;
-                renderPassInfo.dependencyCount = 1;
-                renderPassInfo.pDependencies = &dependency;
-
-                DevLoc::device()->create(renderPassInfo, renderPass);
-            }
-
             VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
                 for (const auto& availableFormat : availableFormats) {
-                    if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
-                            availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                    if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                         return availableFormat;
                     }
                 }
@@ -284,5 +172,22 @@ namespace hw {
                     return actualExtent;
                 }
             }
+
+            void createSwapChainImageViews() {
+                swapChainImageViews.resize(size());
+
+                for (uint32_t i = 0; i < size(); i++) {
+                    swapChainImageViews[i] = create::imageView(image(i), format(), VK_IMAGE_ASPECT_COLOR_BIT);
+                }
+            }
+
+            void createSwapChainDepthResources() {
+                VkFormat depthFormat = findDepthFormat();
+
+                create::image(width(), height(), depthFormat, VK_IMAGE_TILING_OPTIMAL,
+                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+                depthImageView = create::imageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+            }
+
     };
 }

@@ -9,8 +9,7 @@ class DevLoc {
             return _device;
         }
 
-        static void provide(hw::Device* service)
-        {
+        static void provide(hw::Device* service) {
             _device = service;
         }
 

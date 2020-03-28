@@ -31,8 +31,11 @@
 #include "vertex.h"
 #include "device.h"
 #include "read.h"
+#include "insloc.h"
+#include "surloc.h"
 #include "devloc.h"
 #include "cmdloc.h"
+#include "swploc.h"
 #include "create.h"
 #include "command.h"
 #include "texture.h"
@@ -73,15 +76,6 @@ class Application {
     private:
         GLFWwindow* window;
 
-        hw::Instance* instance;
-        hw::Surface* surface;
-        hw::Device* device;
-
-        VkSwapchainKHR swapChain;
-        std::vector<VkImage> swapChainImages;
-        VkFormat swapChainImageFormat;
-        VkExtent2D swapChainExtent;
-        std::vector<VkImageView> swapChainImageViews;
         std::vector<VkFramebuffer> swapChainFramebuffers;
 
         std::vector<VkFramebuffer> imguiFramebuffers;
@@ -101,12 +95,7 @@ class Application {
         VkPipeline graphicsPipeline;
         VkPipeline skyboxPipeline;
 
-        hw::Command* cmd;
         hw::Command* imguicmd;
-
-        VkImage depthImage;
-        VkDeviceMemory depthImageMemory;
-        VkImageView depthImageView;
 
         std::vector<Mesh> meshes;
 
@@ -154,30 +143,24 @@ class Application {
         }
 
         void initVulkan() {
-            instance = new hw::Instance(enableValidationLayers);
-            surface = new hw::Surface(&instance->get(), window);
-            device = new hw::Device(enableValidationLayers, &instance->get(), &surface->get());
-            DevLoc::provide(device);
+            InsLoc::provide(new hw::Instance(enableValidationLayers));
+            SurLoc::provide(new hw::Surface(window));
+            DevLoc::provide(new hw::Device(enableValidationLayers));
+            CmdLoc::provide(new hw::Command());
+            SwpLoc::provide(new hw::SwapChain(window));
+
             VertexLoc::provide(vertices);
             VertexLoc::provide(indices);
-
-            /**/cmd = new hw::Command();
-            CmdLoc::provide(cmd);
 
             /**/meshes.push_back(Mesh("Skybox", "models/cube.obj", std::make_unique<CubeMap>("textures/storforsen")));
             /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
                         glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
             /**/meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
-
-            createSwapChain();
-            createImageViews();
-            createRenderPass();
-
             /**/createDescriptorSetLayout();
-            createPipelines();
 
-            createDepthResources();
-            createFramebuffers();
+            createSwapChainRenderPass();
+            createSwapChainFramebuffers();
+            createSwapChainPipelines();
 
             /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
             /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
@@ -187,7 +170,7 @@ class Application {
             allocateDescriptorSets();
             bindUnisToDescriptorSets();
 
-            cmd->createCommandBuffers(swapChainImages.size());
+            CmdLoc::cmd()->createCommandBuffers(SwpLoc::swapChain()->size());
             recordCommandBuffers();
 
             /**/createSyncObjects();
@@ -203,28 +186,28 @@ class Application {
             createImguiRenderPass();
             createImguiFramebuffers();
 
-            hw::QueueFamilyIndices queueFamilyIndices = device->findQueueFamilies();
+            hw::QueueFamilyIndices queueFamilyIndices = DevLoc::device()->findQueueFamilies();
 
             ImGui_ImplGlfw_InitForVulkan(window, true);
             ImGui_ImplVulkan_InitInfo info = {};
-            info.Instance = instance->get();
-            info.PhysicalDevice = device->getPhysical();
-            info.Device = device->getLogical();
+            info.Instance = InsLoc::instance()->get();
+            info.PhysicalDevice = DevLoc::device()->getPhysical();
+            info.Device = DevLoc::device()->getLogical();
             info.QueueFamily = queueFamilyIndices.graphicsFamily.value();
-            info.Queue = device->getGraphicsQueue();
+            info.Queue = DevLoc::device()->getGraphicsQueue();
             info.PipelineCache = VK_NULL_HANDLE;
             info.DescriptorPool = imguiDescriptorPool;
             info.Allocator = VK_NULL_HANDLE;
-            info.MinImageCount = swapChainImages.size();
-            info.ImageCount = swapChainImages.size();
+            info.MinImageCount = SwpLoc::swapChain()->size();
+            info.ImageCount = SwpLoc::swapChain()->size();
             info.CheckVkResultFn = checkVKresult;
             ImGui_ImplVulkan_Init(&info, imguiRenderPass);
 
-            cmd->customSingleCommand(ImGui_ImplVulkan_CreateFontsTexture);
+            CmdLoc::cmd()->customSingleCommand(ImGui_ImplVulkan_CreateFontsTexture);
             ImGui_ImplVulkan_DestroyFontUploadObjects();
 
             imguicmd = new hw::Command(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-            imguicmd->createCommandBuffers(swapChainImages.size());
+            imguicmd->createCommandBuffers(SwpLoc::swapChain()->size());
         }
 
         void mainLoop() {
@@ -240,73 +223,65 @@ class Application {
                 drawFrame();
             }
 
-            device->waitDevice();
+            DevLoc::device()->waitDevice();
         }
 
         void cleanupSwapChain() {
-            device->destroy(depthImageView);
-            device->destroy(depthImage);
-            device->free(depthImageMemory);
-
             for (auto framebuffer : swapChainFramebuffers) {
-                device->destroy(framebuffer);
+                DevLoc::device()->destroy(framebuffer);
             }
 
             for (auto framebuffer : imguiFramebuffers) {
-                device->destroy(framebuffer);
+                DevLoc::device()->destroy(framebuffer);
             }
 
-            cmd->freeCommandBuffers();
+            CmdLoc::cmd()->freeCommandBuffers();
             imguicmd->freeCommandBuffers();
 
-            device->destroy(graphicsPipeline);
-            device->destroy(skyboxPipeline);
+            DevLoc::device()->destroy(graphicsPipeline);
+            DevLoc::device()->destroy(skyboxPipeline);
 
-            device->destroy(pipelineLayout);
-            device->destroy(renderPass);
-            device->destroy(imguiRenderPass);
+            DevLoc::device()->destroy(pipelineLayout);
+            DevLoc::device()->destroy(renderPass);
+            DevLoc::device()->destroy(imguiRenderPass);
 
-            for (auto imageView : swapChainImageViews) {
-                device->destroy(imageView);
-            }
-
-            device->destroy(swapChain);
+            delete SwpLoc::swapChain();
 
             for (auto& mesh: meshes)
                 mesh.free();
 
-            device->destroy(descriptorPool);
+            DevLoc::device()->destroy(descriptorPool);
         }
 
         void cleanup() {
             cleanupSwapChain();
 
-            device->destroy(descriptorSetLayout);
+            DevLoc::device()->destroy(descriptorSetLayout);
 
-            device->destroy(indexBuffer);
-            device->free(indexBufferMemory);
+            DevLoc::device()->destroy(indexBuffer);
+            DevLoc::device()->free(indexBufferMemory);
 
-            device->destroy(vertexBuffer);
-            device->free(vertexBufferMemory);
+            DevLoc::device()->destroy(vertexBuffer);
+            DevLoc::device()->free(vertexBufferMemory);
 
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                device->destroy(renderFinishedSemaphores[i]);
-                device->destroy(imageAvailableSemaphores[i]);
-                device->destroy(inFlightFences[i]);
+                DevLoc::device()->destroy(renderFinishedSemaphores[i]);
+                DevLoc::device()->destroy(imageAvailableSemaphores[i]);
+                DevLoc::device()->destroy(inFlightFences[i]);
             }
 
             ImGui_ImplVulkan_Shutdown();
             ImGui_ImplGlfw_Shutdown();
             ImGui::DestroyContext();
 
-            device->destroy(imguiDescriptorPool);
+            DevLoc::device()->destroy(imguiDescriptorPool);
             delete imguicmd;
 
             meshes.clear();
-            delete cmd;
-            delete device;
-            delete surface;
-            delete instance;
+            delete CmdLoc::cmd();
+            delete DevLoc::device();
+            delete SurLoc::surface();
+            delete InsLoc::instance();
             delete camera;
 
             glfwDestroyWindow(window);
@@ -322,28 +297,27 @@ class Application {
                 glfwWaitEvents();
             }
 
-            device->waitDevice();
+            DevLoc::device()->waitDevice();
 
             cleanupSwapChain();
 
-            createSwapChain();
-            createImageViews();
-            createRenderPass();
-            createPipelines();
-            createDepthResources();
-            createFramebuffers();
+            SwpLoc::provide(new hw::SwapChain(window));
+            createSwapChainRenderPass();
+            createSwapChainFramebuffers();
+            createSwapChainPipelines();
+
             createUniformBuffers();
             createDescriptorPool();
             allocateDescriptorSets();
             bindUnisToDescriptorSets();
 
-            cmd->createCommandBuffers(swapChainImages.size());
+            CmdLoc::cmd()->createCommandBuffers(SwpLoc::swapChain()->size());
             recordCommandBuffers();
 
             createImguiRenderPass();
             createImguiFramebuffers();
 
-            imguicmd->createCommandBuffers(swapChainImages.size());
+            imguicmd->createCommandBuffers(SwpLoc::swapChain()->size());
         }
 
         void createImguiFramebuffers() {
@@ -354,21 +328,21 @@ class Application {
             info.renderPass = imguiRenderPass;
             info.attachmentCount = 1;
             info.pAttachments = attachment;
-            info.width = swapChainExtent.width;
-            info.height = swapChainExtent.height;
+            info.width = SwpLoc::swapChain()->width();
+            info.height = SwpLoc::swapChain()->height();
             info.layers = 1;
 
-            imguiFramebuffers.resize(swapChainImages.size());
-            for (uint32_t i = 0; i < swapChainImages.size(); i++)
+            imguiFramebuffers.resize(SwpLoc::swapChain()->size());
+            for (uint32_t i = 0; i < SwpLoc::swapChain()->size(); i++)
             {
-                attachment[0] = swapChainImageViews[i];
-                device->create(info, imguiFramebuffers[i]);
+                attachment[0] = SwpLoc::swapChain()->view(i);
+                DevLoc::device()->create(info, imguiFramebuffers[i]);
             }
         }
 
         void createImguiRenderPass() {
             VkAttachmentDescription attachment = {};
-            attachment.format = swapChainImageFormat;
+            attachment.format = SwpLoc::swapChain()->format();
             attachment.samples = VK_SAMPLE_COUNT_1_BIT;
             attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -402,7 +376,7 @@ class Application {
             info.pSubpasses = &subpass;
             info.dependencyCount = 1;
             info.pDependencies = &dependency;
-            device->create(info, imguiRenderPass);
+            DevLoc::device()->create(info, imguiRenderPass);
         }
 
         void createImguiDescriptorPool() {
@@ -427,7 +401,7 @@ class Application {
             info.maxSets = 1000 * IM_ARRAYSIZE(size);
             info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(size);
             info.pPoolSizes = size;
-            device->create(info, imguiDescriptorPool);
+            DevLoc::device()->create(info, imguiDescriptorPool);
         }
 
         static void checkVKresult(VkResult err)
@@ -436,106 +410,9 @@ class Application {
             printf("VkResult %d\n", err);
         }
 
-        void createSwapChain() {
-            auto swapChainSupport = device->querySwapChainSupport();
-
-            VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
-            VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
-            VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
-
-            uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-            if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
-                imageCount = swapChainSupport.capabilities.maxImageCount;
-            }
-
-            VkSwapchainCreateInfoKHR createInfo = {};
-            createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-            createInfo.surface = surface->get();
-
-            createInfo.minImageCount = imageCount;
-            createInfo.imageFormat = surfaceFormat.format;
-            createInfo.imageColorSpace = surfaceFormat.colorSpace;
-            createInfo.imageExtent = extent;
-            createInfo.imageArrayLayers = 1;
-            createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-            auto indices = device->findQueueFamilies();
-            uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
-
-            if (indices.graphicsFamily != indices.presentFamily) {
-                createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-                createInfo.queueFamilyIndexCount = 2;
-                createInfo.pQueueFamilyIndices = queueFamilyIndices;
-            } else {
-                createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            }
-
-            createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
-            createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-            createInfo.presentMode = presentMode;
-            createInfo.clipped = VK_TRUE;
-
-            device->create(createInfo, swapChain);
-
-            device->get(swapChain, imageCount, nullptr);
-            swapChainImages.resize(imageCount);
-            device->get(swapChain, imageCount, swapChainImages.data());
-
-            swapChainImageFormat = surfaceFormat.format;
-            swapChainExtent = extent;
-        }
-
-        VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-            for (const auto& availableFormat : availableFormats) {
-                if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                    return availableFormat;
-                }
-            }
-
-            return availableFormats[0];
-        }
-
-        VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-            for (const auto& availablePresentMode : availablePresentModes) {
-                if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                    return availablePresentMode;
-                }
-            }
-
-            return VK_PRESENT_MODE_FIFO_KHR;
-        }
-
-        VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-            if (capabilities.currentExtent.width != UINT32_MAX) {
-                return capabilities.currentExtent;
-            } else {
-                int width, height;
-                glfwGetFramebufferSize(window, &width, &height);
-
-                VkExtent2D actualExtent = {
-                    static_cast<uint32_t>(width),
-                    static_cast<uint32_t>(height)
-                };
-
-                actualExtent.width = std::max(capabilities.minImageExtent.width,
-                        std::min(capabilities.maxImageExtent.width, actualExtent.width));
-                actualExtent.height = std::max(capabilities.minImageExtent.height,
-                        std::min(capabilities.maxImageExtent.height, actualExtent.height));
-
-                return actualExtent;
-            }
-        }
-        void createImageViews() {
-            swapChainImageViews.resize(swapChainImages.size());
-
-            for (uint32_t i = 0; i < swapChainImages.size(); i++) {
-                swapChainImageViews[i] = create::imageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
-            }
-        }
-
-        void createRenderPass() {
+        void createSwapChainRenderPass() {
             VkAttachmentDescription colorAttachment = {};
-            colorAttachment.format = swapChainImageFormat;
+            colorAttachment.format = SwpLoc::swapChain()->format();
             colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -545,7 +422,7 @@ class Application {
             colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
             VkAttachmentDescription depthAttachment = {};
-            depthAttachment.format = findDepthFormat();
+            depthAttachment.format = SwpLoc::swapChain()->findDepthFormat();
             depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -586,7 +463,7 @@ class Application {
             renderPassInfo.dependencyCount = 1;
             renderPassInfo.pDependencies = &dependency;
 
-            device->create(renderPassInfo, renderPass);
+            DevLoc::device()->create(renderPassInfo, renderPass);
         }
 
         void createDescriptorSetLayout() {
@@ -610,13 +487,13 @@ class Application {
             layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
             layoutInfo.pBindings = bindings.data();
 
-            device->create(layoutInfo, descriptorSetLayout);
+            DevLoc::device()->create(layoutInfo, descriptorSetLayout);
 
             for (auto& mesh: meshes)
-                mesh.descriptor.layout = & descriptorSetLayout;
+                mesh.descriptor.layout = &descriptorSetLayout;
         }
 
-        void createPipelines() {
+        void createSwapChainPipelines() {
             Shader vertBase("shaders/base.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
             Shader fragBase("shaders/base.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
             Shader vertSkybox("shaders/skybox.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
@@ -643,14 +520,14 @@ class Application {
             VkViewport viewport = {};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = (float) swapChainExtent.width;
-            viewport.height = (float) swapChainExtent.height;
+            viewport.width = (float) SwpLoc::swapChain()->width();
+            viewport.height = (float) SwpLoc::swapChain()->height();
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
 
             VkRect2D scissor = {};
             scissor.offset = {0, 0};
-            scissor.extent = swapChainExtent;
+            scissor.extent = SwpLoc::swapChain()->extent();
 
             VkPipelineViewportStateCreateInfo viewportState = {};
             viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -707,7 +584,7 @@ class Application {
             pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
             pipelineLayoutInfo.pSetLayouts = layouts.data();
 
-            device->create(pipelineLayoutInfo, pipelineLayout);
+            DevLoc::device()->create(pipelineLayoutInfo, pipelineLayout);
 
             VkGraphicsPipelineCreateInfo pipelineInfo = {};
             pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -725,7 +602,7 @@ class Application {
             pipelineInfo.subpass = 0;
             pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-            device->create(pipelineInfo, skyboxPipeline);
+            DevLoc::device()->create(pipelineInfo, skyboxPipeline);
 
             shaderStages[0] = vertBase.info();
             shaderStages[1] = fragBase.info();
@@ -733,7 +610,7 @@ class Application {
             depthStencil.depthWriteEnable = VK_TRUE;
             depthStencil.depthTestEnable = VK_TRUE;
 
-            device->create(pipelineInfo, graphicsPipeline);
+            DevLoc::device()->create(pipelineInfo, graphicsPipeline);
 
             for (auto& mesh: meshes)
                 if (mesh.tag != "Skybox")
@@ -742,13 +619,13 @@ class Application {
                     meshes[0].pipeline = &skyboxPipeline;
         }
 
-        void createFramebuffers() {
-            swapChainFramebuffers.resize(swapChainImageViews.size());
+        void createSwapChainFramebuffers() {
+            swapChainFramebuffers.resize(SwpLoc::swapChain()->size());
 
-            for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
                 std::array<VkImageView, 2> attachments = {
-                    swapChainImageViews[i],
-                    depthImageView
+                    SwpLoc::swapChain()->view(i),
+                    SwpLoc::swapChain()->depthView()
                 };
 
                 VkFramebufferCreateInfo framebufferInfo = {};
@@ -756,28 +633,12 @@ class Application {
                 framebufferInfo.renderPass = renderPass;
                 framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
                 framebufferInfo.pAttachments = attachments.data();
-                framebufferInfo.width = swapChainExtent.width;
-                framebufferInfo.height = swapChainExtent.height;
+                framebufferInfo.width = SwpLoc::swapChain()->width();
+                framebufferInfo.height = SwpLoc::swapChain()->height();
                 framebufferInfo.layers = 1;
 
-                device->create(framebufferInfo, swapChainFramebuffers[i]);
+                DevLoc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
             }
-        }
-
-        void createDepthResources() {
-            VkFormat depthFormat = findDepthFormat();
-
-            create::image(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL,
-                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-            depthImageView = create::imageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-        }
-
-        VkFormat findDepthFormat() {
-            return device->find(
-                    {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
-                    VK_IMAGE_TILING_OPTIMAL,
-                    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
-                    );
         }
 
         bool hasStencilComponent(VkFormat format) {
@@ -788,10 +649,10 @@ class Application {
             VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
             for (auto& mesh: meshes) {
-                mesh.uniform.buffers.resize(swapChainImages.size());
-                mesh.uniform.memory.resize(swapChainImages.size());
+                mesh.uniform.buffers.resize(SwpLoc::swapChain()->size());
+                mesh.uniform.memory.resize(SwpLoc::swapChain()->size());
 
-                for (size_t i = 0; i < swapChainImages.size(); i++) {
+                for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
                     create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                             | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
                 }
@@ -801,36 +662,36 @@ class Application {
         void createDescriptorPool() {
             std::array<VkDescriptorPoolSize, 2> poolSizes = {};
             poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
+            poolSizes[0].descriptorCount = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
             poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
+            poolSizes[1].descriptorCount = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
 
             VkDescriptorPoolCreateInfo poolInfo = {};
             poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
             poolInfo.pPoolSizes = poolSizes.data();
-            poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size() * meshes.size());
+            poolInfo.maxSets = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
 
-            device->create(poolInfo, descriptorPool);
+            DevLoc::device()->create(poolInfo, descriptorPool);
         }
 
         void allocateDescriptorSets() {
             for (auto& mesh: meshes) {
-                std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), *mesh.descriptor.layout);
+                std::vector<VkDescriptorSetLayout> layouts(SwpLoc::swapChain()->size(), *mesh.descriptor.layout);
 
                 VkDescriptorSetAllocateInfo allocInfo = {};
                 allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                 allocInfo.descriptorPool = descriptorPool;
-                allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
+                allocInfo.descriptorSetCount = static_cast<uint32_t>(SwpLoc::swapChain()->size());
                 allocInfo.pSetLayouts = layouts.data();
 
-                mesh.descriptor.sets.resize(swapChainImages.size());
-                device->allocate(allocInfo, mesh.descriptor.sets.data());
+                mesh.descriptor.sets.resize(SwpLoc::swapChain()->size());
+                DevLoc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
             }
         }
 
         void bindUnisToDescriptorSets() {
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
+            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
                 VkDescriptorBufferInfo bufferInfo = {};
                 bufferInfo.offset = 0;
                 bufferInfo.range = sizeof(UniformBufferObject);
@@ -863,17 +724,17 @@ class Application {
                     imageInfo.imageView = mesh.texture->view();
                     imageInfo.sampler = mesh.texture->sampler();
 
-                    device->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                    DevLoc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
                 }
             }
         }
 
         void recordCommandBuffers() {
-            for (size_t i = 0; i < swapChainImages.size(); i++) {
+            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
                 VkCommandBufferBeginInfo beginInfo = {};
                 beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-                if (vkBeginCommandBuffer(cmd->get(i), &beginInfo) != VK_SUCCESS) {
+                if (vkBeginCommandBuffer(CmdLoc::cmd()->get(i), &beginInfo) != VK_SUCCESS) {
                     throw std::runtime_error("failed to begin recording command buffer!");
                 }
 
@@ -882,7 +743,7 @@ class Application {
                 renderPassInfo.renderPass = renderPass;
                 renderPassInfo.framebuffer = swapChainFramebuffers[i];
                 renderPassInfo.renderArea.offset = {0, 0};
-                renderPassInfo.renderArea.extent = swapChainExtent;
+                renderPassInfo.renderArea.extent = SwpLoc::swapChain()->extent();
 
                 std::array<VkClearValue, 2> clearValues = {};
                 clearValues[0].color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -891,22 +752,22 @@ class Application {
                 renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
                 renderPassInfo.pClearValues = clearValues.data();
 
-                vkCmdBeginRenderPass(cmd->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBeginRenderPass(CmdLoc::cmd()->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
                 VkDeviceSize offsets[] = {0};
 
                 for (auto& mesh: meshes) {
-                    vkCmdBindDescriptorSets(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    vkCmdBindDescriptorSets(CmdLoc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                    vkCmdBindVertexBuffers(cmd->get(i), 0, 1, &vertexBuffer, offsets);
-                    vkCmdBindIndexBuffer(cmd->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdBindPipeline(cmd->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
-                    vkCmdDrawIndexed(cmd->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                    vkCmdBindVertexBuffers(CmdLoc::cmd()->get(i), 0, 1, &vertexBuffer, offsets);
+                    vkCmdBindIndexBuffer(CmdLoc::cmd()->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindPipeline(CmdLoc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
+                    vkCmdDrawIndexed(CmdLoc::cmd()->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
                 }
 
-                vkCmdEndRenderPass(cmd->get(i));
+                vkCmdEndRenderPass(CmdLoc::cmd()->get(i));
 
-                if (vkEndCommandBuffer(cmd->get(i)) != VK_SUCCESS) {
+                if (vkEndCommandBuffer(CmdLoc::cmd()->get(i)) != VK_SUCCESS) {
                     throw std::runtime_error("failed to record command buffer!");
                 }
             }
@@ -924,8 +785,8 @@ class Application {
             beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             beginInfo.renderPass = imguiRenderPass;
             beginInfo.framebuffer = imguiFramebuffers[imageIndex];
-            beginInfo.renderArea.extent.width = swapChainExtent.width;
-            beginInfo.renderArea.extent.height = swapChainExtent.height;
+            beginInfo.renderArea.extent.width = SwpLoc::swapChain()->width();
+            beginInfo.renderArea.extent.height = SwpLoc::swapChain()->height();
 
             VkClearValue clearValue;
             clearValue.color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -946,7 +807,7 @@ class Application {
             imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
             renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
             inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-            imagesInFlight.resize(swapChainImages.size(), VK_NULL_HANDLE);
+            imagesInFlight.resize(SwpLoc::swapChain()->size(), VK_NULL_HANDLE);
 
             VkSemaphoreCreateInfo semaphoreInfo = {};
             semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -956,9 +817,9 @@ class Application {
             fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                device->create(semaphoreInfo, imageAvailableSemaphores[i]);
-                device->create(semaphoreInfo, renderFinishedSemaphores[i]);
-                device->create(fenceInfo, inFlightFences[i]);
+                DevLoc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
+                DevLoc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
+                DevLoc::device()->create(fenceInfo, inFlightFences[i]);
             }
         }
 
@@ -982,45 +843,10 @@ class Application {
                 } else ubo.model = glm::scale(ubo.model, mesh.scale);
 
                 void* data;
-                device->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
+                DevLoc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
                 memcpy(data, &ubo, sizeof(ubo));
-                device->unmap(mesh.uniform.memory[currentImage]);
+                DevLoc::device()->unmap(mesh.uniform.memory[currentImage]);
             }
-
-            /* static auto startTime = std::chrono::high_resolution_clock::now(); */
-
-            /* auto currentTime = std::chrono::high_resolution_clock::now(); */
-            /* float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count(); */
-
-            /*// Skybox */
-            /*UniformBufferObject ubo = {}; */
-            /*ubo.view = camera->view; */
-            /*ubo.proj = camera->proj; */
-            /*ubo.model = glm::translate(glm::mat4(1.0f), camera->cameraPos); */
-
-            /*void* skyboxData; */
-            /*device->map(skybox.uniform.memory[currentImage], sizeof(ubo), skyboxData); */
-            /*memcpy(skyboxData, &ubo, sizeof(ubo)); */
-            /*device->unmap(skybox.uniform.memory[currentImage]); */
-
-            /*// Chalet */
-            /*ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); */
-            /*/1* ubo.model = glm::rotate(ubo.model, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); *1/ */
-            /*/1* ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, 0.0f, 5.0f)); *1/ */
-            /*ubo.model = glm::translate(ubo.model, glm::vec3(-4.3177f, -4.7955f, 1.8368f)); */
-
-            /*void* data; */
-            /*device->map(chalet.uniform.memory[currentImage], sizeof(ubo), data); */
-            /*memcpy(data, &ubo, sizeof(ubo)); */
-            /*device->unmap(chalet.uniform.memory[currentImage]); */
-
-            /*// Terrain */
-            /*ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f)); */
-
-            /*void* terrainData; */
-            /*device->map(terrain.uniform.memory[currentImage], sizeof(ubo), terrainData); */
-            /*memcpy(terrainData, &ubo, sizeof(ubo)); */
-            /*device->unmap(terrain.uniform.memory[currentImage]); */
         }
 
         void drawFrame() {
@@ -1029,19 +855,16 @@ class Application {
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
             ImGui::Text("Skybox rotation");
-            /* ImGui::SliderFloat("X", &skybox.rotation.x, 0.0f, 360.0f); */
-            /* ImGui::SliderFloat("Y", &skybox.rotation.y, 0.0f, 360.0f); */
-            /* ImGui::SliderFloat("Z", &skybox.rotation.z, 0.0f, 360.0f); */
             ImGui::Render();
 
-            device->waitFence(inFlightFences[currentFrame]);
+            DevLoc::device()->waitFence(inFlightFences[currentFrame]);
 
             uint32_t imageIndex;
-            VkResult result = device->nextImage(swapChain, imageAvailableSemaphores[currentFrame], imageIndex);
+            VkResult result = DevLoc::device()->nextImage(SwpLoc::swapChain()->get(), imageAvailableSemaphores[currentFrame], imageIndex);
 
             if (result == VK_ERROR_OUT_OF_DATE_KHR) {
                 recreateSwapChain();
-                ImGui_ImplVulkan_SetMinImageCount(swapChainImages.size());
+                ImGui_ImplVulkan_SetMinImageCount(SwpLoc::swapChain()->size());
                 return;
             } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
                 throw std::runtime_error("failed to acquire swap chain image!");
@@ -1052,7 +875,7 @@ class Application {
 
             // Sync
             if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
-                device->waitFence(imagesInFlight[imageIndex]);
+                DevLoc::device()->waitFence(imagesInFlight[imageIndex]);
             }
             imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
@@ -1061,7 +884,7 @@ class Application {
 
             // Submit
             std::array<VkCommandBuffer, 2> submitCommandBuffers = {
-                cmd->get(imageIndex),
+                CmdLoc::cmd()->get(imageIndex),
                 imguicmd->get(imageIndex)
             };
 
@@ -1081,9 +904,9 @@ class Application {
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pSignalSemaphores = signalSemaphores;
 
-            device->reset(inFlightFences[currentFrame]);
+            DevLoc::device()->reset(inFlightFences[currentFrame]);
 
-            device->submit(submitInfo, inFlightFences[currentFrame]);
+            DevLoc::device()->submit(submitInfo, inFlightFences[currentFrame]);
 
             // Present Frame
             VkPresentInfoKHR presentInfo = {};
@@ -1092,18 +915,18 @@ class Application {
             presentInfo.waitSemaphoreCount = 1;
             presentInfo.pWaitSemaphores = signalSemaphores;
 
-            VkSwapchainKHR swapChains[] = {swapChain};
+            VkSwapchainKHR swapChains[] = {SwpLoc::swapChain()->get()};
             presentInfo.swapchainCount = 1;
             presentInfo.pSwapchains = swapChains;
 
             presentInfo.pImageIndices = &imageIndex;
 
-            result = device->present(presentInfo);
+            result = DevLoc::device()->present(presentInfo);
 
             if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
                 framebufferResized = false;
                 recreateSwapChain();
-                ImGui_ImplVulkan_SetMinImageCount(swapChainImages.size());
+                ImGui_ImplVulkan_SetMinImageCount(SwpLoc::swapChain()->size());
             } else if (result != VK_SUCCESS) {
                 throw std::runtime_error("failed to present swap chain image!");
             }

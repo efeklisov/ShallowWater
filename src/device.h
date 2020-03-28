@@ -5,7 +5,8 @@
 #include <vector>
 #include <set>
 
-#include "instance.h"
+#include "insloc.h"
+#include "surloc.h"
 
 namespace hw {
     const std::vector<const char*> deviceExtensions = {
@@ -29,16 +30,16 @@ namespace hw {
 
     class Device {
         public:
-            Device(bool _evl, VkInstance* _i, VkSurfaceKHR* _s) : enableValidationLayers(_evl), instance(_i), surface(_s) {
+            Device(bool _evl) : enableValidationLayers(_evl) {
                 uint32_t deviceCount = 0;
-                vkEnumeratePhysicalDevices(*instance, &deviceCount, nullptr);
+                vkEnumeratePhysicalDevices(InsLoc::instance()->get(), &deviceCount, nullptr);
 
                 if (deviceCount == 0) {
                     throw std::runtime_error("failed to find GPUs with Vulkan support!");
                 }
 
                 std::vector<VkPhysicalDevice> devices(deviceCount);
-                vkEnumeratePhysicalDevices(*instance, &deviceCount, devices.data());
+                vkEnumeratePhysicalDevices(InsLoc::instance()->get(), &deviceCount, devices.data());
 
                 for (const auto& _device : devices) {
                     if (isDeviceSuitable(_device)) {
@@ -367,22 +368,22 @@ namespace hw {
             SwapChainSupportDetails querySwapChainSupport() {
                 SwapChainSupportDetails details;
 
-                vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, *surface, &details.capabilities);
+                vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, SurLoc::surface()->get(), &details.capabilities);
 
                 uint32_t formatCount;
-                vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, *surface, &formatCount, nullptr);
+                vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, SurLoc::surface()->get(), &formatCount, nullptr);
 
                 if (formatCount != 0) {
                     details.formats.resize(formatCount);
-                    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, *surface, &formatCount, details.formats.data());
+                    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, SurLoc::surface()->get(), &formatCount, details.formats.data());
                 }
 
                 uint32_t presentModeCount;
-                vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, *surface, &presentModeCount, nullptr);
+                vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, SurLoc::surface()->get(), &presentModeCount, nullptr);
 
                 if (presentModeCount != 0) {
                     details.presentModes.resize(presentModeCount);
-                    vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, *surface, &presentModeCount, details.presentModes.data());
+                    vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, SurLoc::surface()->get(), &presentModeCount, details.presentModes.data());
                 }
 
                 return details;
@@ -404,7 +405,7 @@ namespace hw {
                     }
 
                     VkBool32 presentSupport = false;
-                    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, *surface, &presentSupport);
+                    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, SurLoc::surface()->get(), &presentSupport);
 
                     if (presentSupport) {
                         indices.presentFamily = i;
@@ -451,9 +452,6 @@ namespace hw {
 
         private:
             bool enableValidationLayers;
-
-            VkInstance* instance;
-            VkSurfaceKHR* surface;
 
             VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
             VkDevice device;
@@ -510,7 +508,7 @@ namespace hw {
                     }
 
                     VkBool32 presentSupport = false;
-                    vkGetPhysicalDeviceSurfaceSupportKHR(_physicalDevice, i, *surface, &presentSupport);
+                    vkGetPhysicalDeviceSurfaceSupportKHR(_physicalDevice, i, SurLoc::surface()->get(), &presentSupport);
 
                     if (presentSupport) {
                         indices.presentFamily = i;
@@ -529,22 +527,22 @@ namespace hw {
             SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice _physicalDevice) {
                 SwapChainSupportDetails details;
 
-                vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_physicalDevice, *surface, &details.capabilities);
+                vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_physicalDevice, SurLoc::surface()->get(), &details.capabilities);
 
                 uint32_t formatCount;
-                vkGetPhysicalDeviceSurfaceFormatsKHR(_physicalDevice, *surface, &formatCount, nullptr);
+                vkGetPhysicalDeviceSurfaceFormatsKHR(_physicalDevice, SurLoc::surface()->get(), &formatCount, nullptr);
 
                 if (formatCount != 0) {
                     details.formats.resize(formatCount);
-                    vkGetPhysicalDeviceSurfaceFormatsKHR(_physicalDevice, *surface, &formatCount, details.formats.data());
+                    vkGetPhysicalDeviceSurfaceFormatsKHR(_physicalDevice, SurLoc::surface()->get(), &formatCount, details.formats.data());
                 }
 
                 uint32_t presentModeCount;
-                vkGetPhysicalDeviceSurfacePresentModesKHR(_physicalDevice, *surface, &presentModeCount, nullptr);
+                vkGetPhysicalDeviceSurfacePresentModesKHR(_physicalDevice, SurLoc::surface()->get(), &presentModeCount, nullptr);
 
                 if (presentModeCount != 0) {
                     details.presentModes.resize(presentModeCount);
-                    vkGetPhysicalDeviceSurfacePresentModesKHR(_physicalDevice, *surface, &presentModeCount, details.presentModes.data());
+                    vkGetPhysicalDeviceSurfacePresentModesKHR(_physicalDevice, SurLoc::surface()->get(), &presentModeCount, details.presentModes.data());
                 }
 
                 return details;
