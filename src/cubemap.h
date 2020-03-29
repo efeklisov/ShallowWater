@@ -2,8 +2,9 @@
 
 #include <string>
 
-#include "devloc.h"
-#include "cmdloc.h"
+#include "locator.h"
+#include "device.h"
+#include "command.h"
 #include "create.h"
 #include "image.h"
 
@@ -16,10 +17,10 @@ class CubeMap : public Image {
         }
 
         ~CubeMap() {
-            DevLoc::device()->destroy(textureSampler);
-            DevLoc::device()->destroy(textureImageView);
-            DevLoc::device()->destroy(textureImage);
-            DevLoc::device()->free(textureImageMemory);
+            hw::loc::device()->destroy(textureSampler);
+            hw::loc::device()->destroy(textureImageView);
+            hw::loc::device()->destroy(textureImage);
+            hw::loc::device()->free(textureImageMemory);
         }
 
         VkImageView& view() {
@@ -57,22 +58,22 @@ class CubeMap : public Image {
             create::buffer(cubeMapSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
             void* data;
-            DevLoc::device()->map(stagingBufferMemory, cubeMapSize, data);
+            hw::loc::device()->map(stagingBufferMemory, cubeMapSize, data);
             for (int i = 0; i < 6; i++)
                 memcpy(static_cast<char *>(data) + (static_cast<size_t>(imageSize) * i), pixels[i], static_cast<size_t>(imageSize));
-            DevLoc::device()->unmap(stagingBufferMemory);
+            hw::loc::device()->unmap(stagingBufferMemory);
 
             for (int i = 0; i < 6; i++)
                 stbi_image_free(pixels[i]);
 
             create::cubemap(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
 
-            CmdLoc::cmd()->transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6);
-            CmdLoc::cmd()->copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), 6);
-            CmdLoc::cmd()->transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6);
+            hw::loc::cmd()->transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6);
+            hw::loc::cmd()->copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), 6);
+            hw::loc::cmd()->transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6);
 
-            DevLoc::device()->destroy(stagingBuffer);
-            DevLoc::device()->free(stagingBufferMemory);
+            hw::loc::device()->destroy(stagingBuffer);
+            hw::loc::device()->free(stagingBufferMemory);
         }
 
         void createImageView() {
@@ -95,6 +96,6 @@ class CubeMap : public Image {
             samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
             samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
-            DevLoc::device()->create(samplerInfo, textureSampler);
+            hw::loc::device()->create(samplerInfo, textureSampler);
         }
 };

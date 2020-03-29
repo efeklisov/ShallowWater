@@ -9,8 +9,9 @@
 
 #include <stdexcept>
 
-#include "devloc.h"
-#include "swploc.h"
+#include "locator.h"
+#include "device.h"
+#include "swapchain.h"
 
 class ImGuiImpl {
     public:
@@ -23,24 +24,24 @@ class ImGuiImpl {
             ImGui_ImplGlfw_Shutdown();
             ImGui::DestroyContext();
 
-            DevLoc::device()->destroy(imguiDescriptorPool);
+            hw::loc::device()->destroy(imguiDescriptorPool);
             delete imguicmd;
         }
 
         void cleanup() {
             for (auto framebuffer : imguiFramebuffers) {
-                DevLoc::device()->destroy(framebuffer);
+                hw::loc::device()->destroy(framebuffer);
             }
 
             imguicmd->freeCommandBuffers();
-            DevLoc::device()->destroy(imguiRenderPass);
+            hw::loc::device()->destroy(imguiRenderPass);
         }
 
         void adjust() {
             createImguiRenderPass();
             createImguiFramebuffers();
 
-            imguicmd->createCommandBuffers(SwpLoc::swapChain()->size());
+            imguicmd->createCommandBuffers(hw::loc::swapChain()->size());
         }
 
         VkCommandBuffer& getCommandBuffer(uint32_t index) {
@@ -59,8 +60,8 @@ class ImGuiImpl {
             beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             beginInfo.renderPass = imguiRenderPass;
             beginInfo.framebuffer = imguiFramebuffers[imageIndex];
-            beginInfo.renderArea.extent.width = SwpLoc::swapChain()->width();
-            beginInfo.renderArea.extent.height = SwpLoc::swapChain()->height();
+            beginInfo.renderArea.extent.width = hw::loc::swapChain()->width();
+            beginInfo.renderArea.extent.height = hw::loc::swapChain()->height();
 
             VkClearValue clearValue;
             clearValue.color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -94,28 +95,28 @@ class ImGuiImpl {
             createImguiRenderPass();
             createImguiFramebuffers();
 
-            hw::QueueFamilyIndices queueFamilyIndices = DevLoc::device()->findQueueFamilies();
+            hw::QueueFamilyIndices queueFamilyIndices = hw::loc::device()->findQueueFamilies();
 
             ImGui_ImplGlfw_InitForVulkan(window, true);
             ImGui_ImplVulkan_InitInfo info = {};
-            info.Instance = InsLoc::instance()->get();
-            info.PhysicalDevice = DevLoc::device()->getPhysical();
-            info.Device = DevLoc::device()->getLogical();
+            info.Instance = hw::loc::instance()->get();
+            info.PhysicalDevice = hw::loc::device()->getPhysical();
+            info.Device = hw::loc::device()->getLogical();
             info.QueueFamily = queueFamilyIndices.graphicsFamily.value();
-            info.Queue = DevLoc::device()->getGraphicsQueue();
+            info.Queue = hw::loc::device()->getGraphicsQueue();
             info.PipelineCache = VK_NULL_HANDLE;
             info.DescriptorPool = imguiDescriptorPool;
             info.Allocator = VK_NULL_HANDLE;
-            info.MinImageCount = SwpLoc::swapChain()->size();
-            info.ImageCount = SwpLoc::swapChain()->size();
+            info.MinImageCount = hw::loc::swapChain()->size();
+            info.ImageCount = hw::loc::swapChain()->size();
             info.CheckVkResultFn = checkVKresult;
             ImGui_ImplVulkan_Init(&info, imguiRenderPass);
 
-            CmdLoc::cmd()->customSingleCommand(ImGui_ImplVulkan_CreateFontsTexture);
+            hw::loc::cmd()->customSingleCommand(ImGui_ImplVulkan_CreateFontsTexture);
             ImGui_ImplVulkan_DestroyFontUploadObjects();
 
             imguicmd = new hw::Command(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-            imguicmd->createCommandBuffers(SwpLoc::swapChain()->size());
+            imguicmd->createCommandBuffers(hw::loc::swapChain()->size());
         }
 
         void createImguiFramebuffers() {
@@ -126,21 +127,21 @@ class ImGuiImpl {
             info.renderPass = imguiRenderPass;
             info.attachmentCount = 1;
             info.pAttachments = attachment;
-            info.width = SwpLoc::swapChain()->width();
-            info.height = SwpLoc::swapChain()->height();
+            info.width = hw::loc::swapChain()->width();
+            info.height = hw::loc::swapChain()->height();
             info.layers = 1;
 
-            imguiFramebuffers.resize(SwpLoc::swapChain()->size());
-            for (uint32_t i = 0; i < SwpLoc::swapChain()->size(); i++)
+            imguiFramebuffers.resize(hw::loc::swapChain()->size());
+            for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++)
             {
-                attachment[0] = SwpLoc::swapChain()->view(i);
-                DevLoc::device()->create(info, imguiFramebuffers[i]);
+                attachment[0] = hw::loc::swapChain()->view(i);
+                hw::loc::device()->create(info, imguiFramebuffers[i]);
             }
         }
 
         void createImguiRenderPass() {
             VkAttachmentDescription attachment = {};
-            attachment.format = SwpLoc::swapChain()->format();
+            attachment.format = hw::loc::swapChain()->format();
             attachment.samples = VK_SAMPLE_COUNT_1_BIT;
             attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -174,7 +175,7 @@ class ImGuiImpl {
             info.pSubpasses = &subpass;
             info.dependencyCount = 1;
             info.pDependencies = &dependency;
-            DevLoc::device()->create(info, imguiRenderPass);
+            hw::loc::device()->create(info, imguiRenderPass);
         }
 
         void createImguiDescriptorPool() {
@@ -199,7 +200,7 @@ class ImGuiImpl {
             info.maxSets = 1000 * IM_ARRAYSIZE(size);
             info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(size);
             info.pPoolSizes = size;
-            DevLoc::device()->create(info, imguiDescriptorPool);
+            hw::loc::device()->create(info, imguiDescriptorPool);
         }
 
         static void checkVKresult(VkResult err)

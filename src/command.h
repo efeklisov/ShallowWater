@@ -4,13 +4,14 @@
 
 #include <stdexcept>
 
-#include "devloc.h"
+#include "locator.h"
+#include "device.h"
 
 namespace hw {
     class Command {
         public:
             Command(uint32_t flags=0) {
-                hw::QueueFamilyIndices queueFamilyIndices = DevLoc::device()->findQueueFamilies();
+                hw::QueueFamilyIndices queueFamilyIndices = hw::loc::device()->findQueueFamilies();
 
                 VkCommandPoolCreateInfo poolInfo = {};
                 poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -18,11 +19,11 @@ namespace hw {
                 if (flags != 0)
                     poolInfo.flags = flags;
 
-                DevLoc::device()->create(poolInfo, commandPool);
+                hw::loc::device()->create(poolInfo, commandPool);
             }
 
             ~Command() {
-                DevLoc::device()->destroy(commandPool);
+                hw::loc::device()->destroy(commandPool);
             }
 
             VkCommandBuffer& get(uint32_t index) {
@@ -119,11 +120,11 @@ namespace hw {
                 allocInfo.commandPool = commandPool;
                 allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
 
-                DevLoc::device()->allocate(allocInfo, commandBuffers.data());
+                hw::loc::device()->allocate(allocInfo, commandBuffers.data());
             }
 
             void freeCommandBuffers() {
-                DevLoc::device()->free(commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+                hw::loc::device()->free(commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
             }
 
             void customSingleCommand(bool func(VkCommandBuffer)) {
@@ -141,7 +142,7 @@ namespace hw {
                 allocInfo.commandBufferCount = 1;
 
                 VkCommandBuffer commandBuffer;
-                DevLoc::device()->allocate(allocInfo, &commandBuffer);
+                hw::loc::device()->allocate(allocInfo, &commandBuffer);
 
                 VkCommandBufferBeginInfo beginInfo = {};
                 beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -160,10 +161,10 @@ namespace hw {
                 submitInfo.commandBufferCount = 1;
                 submitInfo.pCommandBuffers = &commandBuffer;
 
-                DevLoc::device()->submit(submitInfo, VK_NULL_HANDLE);
-                DevLoc::device()->waitQueue();
+                hw::loc::device()->submit(submitInfo, VK_NULL_HANDLE);
+                hw::loc::device()->waitQueue();
 
-                DevLoc::device()->free(commandPool, 1, &commandBuffer);
+                hw::loc::device()->free(commandPool, 1, &commandBuffer);
             }
 
             VkCommandPool commandPool;

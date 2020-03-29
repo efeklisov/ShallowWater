@@ -27,11 +27,6 @@
 #include "vertex.h"
 #include "device.h"
 #include "read.h"
-#include "insloc.h"
-#include "surloc.h"
-#include "devloc.h"
-#include "cmdloc.h"
-#include "swploc.h"
 #include "create.h"
 #include "command.h"
 #include "texture.h"
@@ -39,8 +34,10 @@
 #include "shader.h"
 #include "mesh.h"
 #include "camera.h"
-#include "vertexloc.h"
 #include "imguiimpl.h"
+#include "locator.h"
+#include "swapchain.h"
+#include "vertex.h"
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -134,14 +131,14 @@ class Application {
         }
 
         void initVulkan() {
-            InsLoc::provide(new hw::Instance(enableValidationLayers));
-            SurLoc::provide(new hw::Surface(window));
-            DevLoc::provide(new hw::Device(enableValidationLayers));
-            CmdLoc::provide(new hw::Command());
-            SwpLoc::provide(new hw::SwapChain(window));
+            hw::loc::provide(new hw::Instance(enableValidationLayers));
+            hw::loc::provide(new hw::Surface(window));
+            hw::loc::provide(new hw::Device(enableValidationLayers));
+            hw::loc::provide(new hw::Command());
+            hw::loc::provide(new hw::SwapChain(window));
 
-            VertexLoc::provide(vertices);
-            VertexLoc::provide(indices);
+            hw::loc::provide(vertices);
+            hw::loc::provide(indices);
 
             /**/meshes.push_back(Mesh("Skybox", "models/cube.obj", std::make_unique<CubeMap>("textures/storforsen")));
             /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
@@ -161,7 +158,7 @@ class Application {
             allocateDescriptorSets();
             bindUnisToDescriptorSets();
 
-            CmdLoc::cmd()->createCommandBuffers(SwpLoc::swapChain()->size());
+            hw::loc::cmd()->createCommandBuffers(hw::loc::swapChain()->size());
             recordCommandBuffers();
 
             /**/createSyncObjects();
@@ -180,54 +177,54 @@ class Application {
                 drawFrame();
             }
 
-            DevLoc::device()->waitDevice();
+            hw::loc::device()->waitDevice();
         }
 
         void cleanupSwapChain() {
             for (auto framebuffer : swapChainFramebuffers) {
-                DevLoc::device()->destroy(framebuffer);
+                hw::loc::device()->destroy(framebuffer);
             }
 
-            CmdLoc::cmd()->freeCommandBuffers();
+            hw::loc::cmd()->freeCommandBuffers();
 
-            DevLoc::device()->destroy(graphicsPipeline);
-            DevLoc::device()->destroy(skyboxPipeline);
+            hw::loc::device()->destroy(graphicsPipeline);
+            hw::loc::device()->destroy(skyboxPipeline);
 
-            DevLoc::device()->destroy(pipelineLayout);
-            DevLoc::device()->destroy(renderPass);
+            hw::loc::device()->destroy(pipelineLayout);
+            hw::loc::device()->destroy(renderPass);
 
             imgui->cleanup();
-            delete SwpLoc::swapChain();
+            delete hw::loc::swapChain();
 
             for (auto& mesh: meshes)
                 mesh.free();
 
-            DevLoc::device()->destroy(descriptorPool);
+            hw::loc::device()->destroy(descriptorPool);
         }
 
         void cleanup() {
             cleanupSwapChain();
 
-            DevLoc::device()->destroy(descriptorSetLayout);
+            hw::loc::device()->destroy(descriptorSetLayout);
 
-            DevLoc::device()->destroy(indexBuffer);
-            DevLoc::device()->free(indexBufferMemory);
+            hw::loc::device()->destroy(indexBuffer);
+            hw::loc::device()->free(indexBufferMemory);
 
-            DevLoc::device()->destroy(vertexBuffer);
-            DevLoc::device()->free(vertexBufferMemory);
+            hw::loc::device()->destroy(vertexBuffer);
+            hw::loc::device()->free(vertexBufferMemory);
 
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                DevLoc::device()->destroy(renderFinishedSemaphores[i]);
-                DevLoc::device()->destroy(imageAvailableSemaphores[i]);
-                DevLoc::device()->destroy(inFlightFences[i]);
+                hw::loc::device()->destroy(renderFinishedSemaphores[i]);
+                hw::loc::device()->destroy(imageAvailableSemaphores[i]);
+                hw::loc::device()->destroy(inFlightFences[i]);
             }
 
             meshes.clear();
             delete imgui;
-            delete CmdLoc::cmd();
-            delete DevLoc::device();
-            delete SurLoc::surface();
-            delete InsLoc::instance();
+            delete hw::loc::cmd();
+            delete hw::loc::device();
+            delete hw::loc::surface();
+            delete hw::loc::instance();
             delete camera;
 
             glfwDestroyWindow(window);
@@ -243,11 +240,11 @@ class Application {
                 glfwWaitEvents();
             }
 
-            DevLoc::device()->waitDevice();
+            hw::loc::device()->waitDevice();
 
             cleanupSwapChain();
 
-            SwpLoc::provide(new hw::SwapChain(window));
+            hw::loc::provide(new hw::SwapChain(window));
             createSwapChainRenderPass();
             createSwapChainFramebuffers();
             createSwapChainPipelines();
@@ -259,13 +256,13 @@ class Application {
 
             imgui->adjust();
 
-            CmdLoc::cmd()->createCommandBuffers(SwpLoc::swapChain()->size());
+            hw::loc::cmd()->createCommandBuffers(hw::loc::swapChain()->size());
             recordCommandBuffers();
         }
 
         void createSwapChainRenderPass() {
             VkAttachmentDescription colorAttachment = {};
-            colorAttachment.format = SwpLoc::swapChain()->format();
+            colorAttachment.format = hw::loc::swapChain()->format();
             colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -275,7 +272,7 @@ class Application {
             colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
             VkAttachmentDescription depthAttachment = {};
-            depthAttachment.format = SwpLoc::swapChain()->findDepthFormat();
+            depthAttachment.format = hw::loc::swapChain()->findDepthFormat();
             depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -316,7 +313,7 @@ class Application {
             renderPassInfo.dependencyCount = 1;
             renderPassInfo.pDependencies = &dependency;
 
-            DevLoc::device()->create(renderPassInfo, renderPass);
+            hw::loc::device()->create(renderPassInfo, renderPass);
         }
 
         void createDescriptorSetLayout() {
@@ -340,7 +337,7 @@ class Application {
             layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
             layoutInfo.pBindings = bindings.data();
 
-            DevLoc::device()->create(layoutInfo, descriptorSetLayout);
+            hw::loc::device()->create(layoutInfo, descriptorSetLayout);
 
             for (auto& mesh: meshes)
                 mesh.descriptor.layout = &descriptorSetLayout;
@@ -373,14 +370,14 @@ class Application {
             VkViewport viewport = {};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = (float) SwpLoc::swapChain()->width();
-            viewport.height = (float) SwpLoc::swapChain()->height();
+            viewport.width = (float) hw::loc::swapChain()->width();
+            viewport.height = (float) hw::loc::swapChain()->height();
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
 
             VkRect2D scissor = {};
             scissor.offset = {0, 0};
-            scissor.extent = SwpLoc::swapChain()->extent();
+            scissor.extent = hw::loc::swapChain()->extent();
 
             VkPipelineViewportStateCreateInfo viewportState = {};
             viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -437,7 +434,7 @@ class Application {
             pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
             pipelineLayoutInfo.pSetLayouts = layouts.data();
 
-            DevLoc::device()->create(pipelineLayoutInfo, pipelineLayout);
+            hw::loc::device()->create(pipelineLayoutInfo, pipelineLayout);
 
             VkGraphicsPipelineCreateInfo pipelineInfo = {};
             pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -455,7 +452,7 @@ class Application {
             pipelineInfo.subpass = 0;
             pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-            DevLoc::device()->create(pipelineInfo, skyboxPipeline);
+            hw::loc::device()->create(pipelineInfo, skyboxPipeline);
 
             shaderStages[0] = vertBase.info();
             shaderStages[1] = fragBase.info();
@@ -463,7 +460,7 @@ class Application {
             depthStencil.depthWriteEnable = VK_TRUE;
             depthStencil.depthTestEnable = VK_TRUE;
 
-            DevLoc::device()->create(pipelineInfo, graphicsPipeline);
+            hw::loc::device()->create(pipelineInfo, graphicsPipeline);
 
             for (auto& mesh: meshes)
                 if (mesh.tag != "Skybox")
@@ -473,12 +470,12 @@ class Application {
         }
 
         void createSwapChainFramebuffers() {
-            swapChainFramebuffers.resize(SwpLoc::swapChain()->size());
+            swapChainFramebuffers.resize(hw::loc::swapChain()->size());
 
-            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
+            for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 std::array<VkImageView, 2> attachments = {
-                    SwpLoc::swapChain()->view(i),
-                    SwpLoc::swapChain()->depthView()
+                    hw::loc::swapChain()->view(i),
+                    hw::loc::swapChain()->depthView()
                 };
 
                 VkFramebufferCreateInfo framebufferInfo = {};
@@ -486,11 +483,11 @@ class Application {
                 framebufferInfo.renderPass = renderPass;
                 framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
                 framebufferInfo.pAttachments = attachments.data();
-                framebufferInfo.width = SwpLoc::swapChain()->width();
-                framebufferInfo.height = SwpLoc::swapChain()->height();
+                framebufferInfo.width = hw::loc::swapChain()->width();
+                framebufferInfo.height = hw::loc::swapChain()->height();
                 framebufferInfo.layers = 1;
 
-                DevLoc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
+                hw::loc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
             }
         }
 
@@ -502,10 +499,10 @@ class Application {
             VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
             for (auto& mesh: meshes) {
-                mesh.uniform.buffers.resize(SwpLoc::swapChain()->size());
-                mesh.uniform.memory.resize(SwpLoc::swapChain()->size());
+                mesh.uniform.buffers.resize(hw::loc::swapChain()->size());
+                mesh.uniform.memory.resize(hw::loc::swapChain()->size());
 
-                for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
+                for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                     create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                             | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
                 }
@@ -515,36 +512,36 @@ class Application {
         void createDescriptorPool() {
             std::array<VkDescriptorPoolSize, 2> poolSizes = {};
             poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            poolSizes[0].descriptorCount = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
+            poolSizes[0].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
             poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            poolSizes[1].descriptorCount = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
+            poolSizes[1].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
 
             VkDescriptorPoolCreateInfo poolInfo = {};
             poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
             poolInfo.pPoolSizes = poolSizes.data();
-            poolInfo.maxSets = static_cast<uint32_t>(SwpLoc::swapChain()->size() * meshes.size());
+            poolInfo.maxSets = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
 
-            DevLoc::device()->create(poolInfo, descriptorPool);
+            hw::loc::device()->create(poolInfo, descriptorPool);
         }
 
         void allocateDescriptorSets() {
             for (auto& mesh: meshes) {
-                std::vector<VkDescriptorSetLayout> layouts(SwpLoc::swapChain()->size(), *mesh.descriptor.layout);
+                std::vector<VkDescriptorSetLayout> layouts(hw::loc::swapChain()->size(), *mesh.descriptor.layout);
 
                 VkDescriptorSetAllocateInfo allocInfo = {};
                 allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                 allocInfo.descriptorPool = descriptorPool;
-                allocInfo.descriptorSetCount = static_cast<uint32_t>(SwpLoc::swapChain()->size());
+                allocInfo.descriptorSetCount = static_cast<uint32_t>(hw::loc::swapChain()->size());
                 allocInfo.pSetLayouts = layouts.data();
 
-                mesh.descriptor.sets.resize(SwpLoc::swapChain()->size());
-                DevLoc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
+                mesh.descriptor.sets.resize(hw::loc::swapChain()->size());
+                hw::loc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
             }
         }
 
         void bindUnisToDescriptorSets() {
-            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
+            for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 VkDescriptorBufferInfo bufferInfo = {};
                 bufferInfo.offset = 0;
                 bufferInfo.range = sizeof(UniformBufferObject);
@@ -577,17 +574,17 @@ class Application {
                     imageInfo.imageView = mesh.texture->view();
                     imageInfo.sampler = mesh.texture->sampler();
 
-                    DevLoc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
                 }
             }
         }
 
         void recordCommandBuffers() {
-            for (size_t i = 0; i < SwpLoc::swapChain()->size(); i++) {
+            for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 VkCommandBufferBeginInfo beginInfo = {};
                 beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-                if (vkBeginCommandBuffer(CmdLoc::cmd()->get(i), &beginInfo) != VK_SUCCESS) {
+                if (vkBeginCommandBuffer(hw::loc::cmd()->get(i), &beginInfo) != VK_SUCCESS) {
                     throw std::runtime_error("failed to begin recording command buffer!");
                 }
 
@@ -596,7 +593,7 @@ class Application {
                 renderPassInfo.renderPass = renderPass;
                 renderPassInfo.framebuffer = swapChainFramebuffers[i];
                 renderPassInfo.renderArea.offset = {0, 0};
-                renderPassInfo.renderArea.extent = SwpLoc::swapChain()->extent();
+                renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
 
                 std::array<VkClearValue, 2> clearValues = {};
                 clearValues[0].color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -605,22 +602,22 @@ class Application {
                 renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
                 renderPassInfo.pClearValues = clearValues.data();
 
-                vkCmdBeginRenderPass(CmdLoc::cmd()->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBeginRenderPass(hw::loc::cmd()->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
                 VkDeviceSize offsets[] = {0};
 
                 for (auto& mesh: meshes) {
-                    vkCmdBindDescriptorSets(CmdLoc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    vkCmdBindDescriptorSets(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                    vkCmdBindVertexBuffers(CmdLoc::cmd()->get(i), 0, 1, &vertexBuffer, offsets);
-                    vkCmdBindIndexBuffer(CmdLoc::cmd()->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdBindPipeline(CmdLoc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
-                    vkCmdDrawIndexed(CmdLoc::cmd()->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                    vkCmdBindVertexBuffers(hw::loc::cmd()->get(i), 0, 1, &vertexBuffer, offsets);
+                    vkCmdBindIndexBuffer(hw::loc::cmd()->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindPipeline(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
+                    vkCmdDrawIndexed(hw::loc::cmd()->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
                 }
 
-                vkCmdEndRenderPass(CmdLoc::cmd()->get(i));
+                vkCmdEndRenderPass(hw::loc::cmd()->get(i));
 
-                if (vkEndCommandBuffer(CmdLoc::cmd()->get(i)) != VK_SUCCESS) {
+                if (vkEndCommandBuffer(hw::loc::cmd()->get(i)) != VK_SUCCESS) {
                     throw std::runtime_error("failed to record command buffer!");
                 }
             }
@@ -630,7 +627,7 @@ class Application {
             imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
             renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
             inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-            imagesInFlight.resize(SwpLoc::swapChain()->size(), VK_NULL_HANDLE);
+            imagesInFlight.resize(hw::loc::swapChain()->size(), VK_NULL_HANDLE);
 
             VkSemaphoreCreateInfo semaphoreInfo = {};
             semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -640,9 +637,9 @@ class Application {
             fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                DevLoc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
-                DevLoc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
-                DevLoc::device()->create(fenceInfo, inFlightFences[i]);
+                hw::loc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
+                hw::loc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
+                hw::loc::device()->create(fenceInfo, inFlightFences[i]);
             }
         }
 
@@ -666,9 +663,9 @@ class Application {
                 } else ubo.model = glm::scale(ubo.model, mesh.scale);
 
                 void* data;
-                DevLoc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
+                hw::loc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
                 memcpy(data, &ubo, sizeof(ubo));
-                DevLoc::device()->unmap(mesh.uniform.memory[currentImage]);
+                hw::loc::device()->unmap(mesh.uniform.memory[currentImage]);
             }
         }
 
@@ -680,14 +677,14 @@ class Application {
             ImGui::Text("Skybox rotation");
             ImGui::Render();
 
-            DevLoc::device()->waitFence(inFlightFences[currentFrame]);
+            hw::loc::device()->waitFence(inFlightFences[currentFrame]);
 
             uint32_t imageIndex;
-            VkResult result = DevLoc::device()->nextImage(SwpLoc::swapChain()->get(), imageAvailableSemaphores[currentFrame], imageIndex);
+            VkResult result = hw::loc::device()->nextImage(hw::loc::swapChain()->get(), imageAvailableSemaphores[currentFrame], imageIndex);
 
             if (result == VK_ERROR_OUT_OF_DATE_KHR) {
                 recreateSwapChain();
-                ImGui_ImplVulkan_SetMinImageCount(SwpLoc::swapChain()->size());
+                ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
                 return;
             } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
                 throw std::runtime_error("failed to acquire swap chain image!");
@@ -698,7 +695,7 @@ class Application {
 
             // Sync
             if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
-                DevLoc::device()->waitFence(imagesInFlight[imageIndex]);
+                hw::loc::device()->waitFence(imagesInFlight[imageIndex]);
             }
             imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
@@ -707,7 +704,7 @@ class Application {
 
             // Submit
             std::array<VkCommandBuffer, 2> submitCommandBuffers = {
-                CmdLoc::cmd()->get(imageIndex),
+                hw::loc::cmd()->get(imageIndex),
                 imgui->getCommandBuffer(imageIndex)
             };
 
@@ -727,9 +724,9 @@ class Application {
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pSignalSemaphores = signalSemaphores;
 
-            DevLoc::device()->reset(inFlightFences[currentFrame]);
+            hw::loc::device()->reset(inFlightFences[currentFrame]);
 
-            DevLoc::device()->submit(submitInfo, inFlightFences[currentFrame]);
+            hw::loc::device()->submit(submitInfo, inFlightFences[currentFrame]);
 
             // Present Frame
             VkPresentInfoKHR presentInfo = {};
@@ -738,18 +735,18 @@ class Application {
             presentInfo.waitSemaphoreCount = 1;
             presentInfo.pWaitSemaphores = signalSemaphores;
 
-            VkSwapchainKHR swapChains[] = {SwpLoc::swapChain()->get()};
+            VkSwapchainKHR swapChains[] = {hw::loc::swapChain()->get()};
             presentInfo.swapchainCount = 1;
             presentInfo.pSwapchains = swapChains;
 
             presentInfo.pImageIndices = &imageIndex;
 
-            result = DevLoc::device()->present(presentInfo);
+            result = hw::loc::device()->present(presentInfo);
 
             if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
                 framebufferResized = false;
                 recreateSwapChain();
-                ImGui_ImplVulkan_SetMinImageCount(SwpLoc::swapChain()->size());
+                ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
             } else if (result != VK_SUCCESS) {
                 throw std::runtime_error("failed to present swap chain image!");
             }

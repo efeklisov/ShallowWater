@@ -2,8 +2,9 @@
 
 #include <vulkan/vulkan.h>
 
-#include "surloc.h"
-#include "devloc.h"
+#include "locator.h"
+#include "device.h"
+#include "surface.h"
 #include "create.h"
 
 namespace hw {
@@ -16,15 +17,15 @@ namespace hw {
             }
 
             ~SwapChain() {
-                DevLoc::device()->destroy(depthImageView);
-                DevLoc::device()->destroy(depthImage);
-                DevLoc::device()->free(depthImageMemory);
+                hw::loc::device()->destroy(depthImageView);
+                hw::loc::device()->destroy(depthImage);
+                hw::loc::device()->free(depthImageMemory);
 
                 for (auto imageView : swapChainImageViews) {
-                    DevLoc::device()->destroy(imageView);
+                    hw::loc::device()->destroy(imageView);
                 }
 
-                DevLoc::device()->destroy(swapChain);
+                hw::loc::device()->destroy(swapChain);
             }
 
             uint32_t size() {
@@ -64,7 +65,7 @@ namespace hw {
             }
 
             VkFormat findDepthFormat() {
-                return DevLoc::device()->find(
+                return hw::loc::device()->find(
                         {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
                         VK_IMAGE_TILING_OPTIMAL,
                         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
@@ -84,7 +85,7 @@ namespace hw {
             VkImageView depthImageView;
 
             void createSwapChain() {
-                auto swapChainSupport = DevLoc::device()->querySwapChainSupport();
+                auto swapChainSupport = hw::loc::device()->querySwapChainSupport();
 
                 VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
                 VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
@@ -97,7 +98,7 @@ namespace hw {
 
                 VkSwapchainCreateInfoKHR createInfo = {};
                 createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-                createInfo.surface = SurLoc::surface()->get();
+                createInfo.surface = hw::loc::surface()->get();
 
                 createInfo.minImageCount = imageCount;
                 createInfo.imageFormat = surfaceFormat.format;
@@ -106,7 +107,7 @@ namespace hw {
                 createInfo.imageArrayLayers = 1;
                 createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-                auto indices = DevLoc::device()->findQueueFamilies();
+                auto indices = hw::loc::device()->findQueueFamilies();
                 uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
                 if (indices.graphicsFamily != indices.presentFamily) {
@@ -122,11 +123,11 @@ namespace hw {
                 createInfo.presentMode = presentMode;
                 createInfo.clipped = VK_TRUE;
 
-                DevLoc::device()->create(createInfo, swapChain);
+                hw::loc::device()->create(createInfo, swapChain);
 
-                DevLoc::device()->get(swapChain, imageCount, nullptr);
+                hw::loc::device()->get(swapChain, imageCount, nullptr);
                 swapChainImages.resize(imageCount);
-                DevLoc::device()->get(swapChain, imageCount, swapChainImages.data());
+                hw::loc::device()->get(swapChain, imageCount, swapChainImages.data());
 
                 swapChainImageFormat = surfaceFormat.format;
                 swapChainExtent = extent;

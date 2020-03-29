@@ -6,11 +6,13 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <memory>
 
 #include "image.h"
-#include "devloc.h"
+#include "locator.h"
+#include "device.h"
+#include "vertex.h"
 #include "read.h"
-#include "vertexloc.h"
 
 struct Mesh {
     Mesh(std::string_view _tag, std::string_view model, std::unique_ptr<Image> _texture,
@@ -20,7 +22,7 @@ struct Mesh {
     : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
 
         texture = std::move(_texture);
-        read::model(model.data(), VertexLoc::vertices(), VertexLoc::indices(), vertex.start, vertex.size);
+        read::model(model.data(), hw::loc::vertices(), hw::loc::indices(), vertex.start, vertex.size);
     }
 
     std::string tag;
@@ -49,8 +51,8 @@ struct Mesh {
 
     void free() {
         for (uint32_t i = 0; i < uniform.buffers.size(); i++) {
-            DevLoc::device()->destroy(uniform.buffers[i]);
-            DevLoc::device()->free(uniform.memory[i]);
+            hw::loc::device()->destroy(uniform.buffers[i]);
+            hw::loc::device()->free(uniform.memory[i]);
         }
     }
 };

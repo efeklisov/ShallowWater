@@ -5,19 +5,20 @@
 
 #include <stdexcept>
 
-#include "insloc.h"
+#include "locator.h"
+#include "instance.h"
 
 namespace hw {
     class Surface {
         public:
             Surface(GLFWwindow* window) {
-                if (glfwCreateWindowSurface(InsLoc::instance()->get(), window, nullptr, &surface) != VK_SUCCESS) {
+                if (glfwCreateWindowSurface(hw::loc::instance()->get(), window, nullptr, &surface) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create window surface!");
                 }
             }
 
             ~Surface() {
-                vkDestroySurfaceKHR(InsLoc::instance()->get(), surface, nullptr);
+                vkDestroySurfaceKHR(hw::loc::instance()->get(), surface, nullptr);
             }
 
             VkSurfaceKHR& get() {

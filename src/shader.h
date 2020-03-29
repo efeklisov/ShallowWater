@@ -4,7 +4,8 @@
 
 #include <string_view>
 
-#include "devloc.h"
+#include "locator.h"
+#include "device.h"
 #include "read.h"
 
 class Shader {
@@ -21,7 +22,7 @@ class Shader {
             createInfo.codeSize = code.size();
             createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
-            DevLoc::device()->create(createInfo, shaderModule);
+            hw::loc::device()->create(createInfo, shaderModule);
 
             shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
             shaderStageInfo.stage = stage;
@@ -30,7 +31,7 @@ class Shader {
         }
 
         ~Shader() {
-            DevLoc::device()->destroy(shaderModule);
+            hw::loc::device()->destroy(shaderModule);
         }
     private:
         VkShaderModule shaderModule;
