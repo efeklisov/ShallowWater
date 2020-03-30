@@ -716,7 +716,8 @@ class Application {
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
-            ImGui::Text("Skybox rotation");
+            ImGui::Text("Clip Distance Change");
+            ImGui::SliderFloat("Height", &clipPlane.w, -10.0f, 10.0f);
             ImGui::Render();
 
             hw::loc::device()->waitFence(inFlightFences[currentFrame]);
