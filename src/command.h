@@ -6,6 +6,7 @@
 
 #include "locator.h"
 #include "device.h"
+#include "create.h"
 
 namespace hw {
     class Command {
@@ -131,6 +132,50 @@ namespace hw {
                 VkCommandBuffer command_buffer = beginSingleTimeCommands();
                 func(command_buffer);
                 endSingleTimeCommands(command_buffer);
+            }
+
+            void vertexBuffer(std::vector<Vertex>& vertices, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+                VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+                VkBuffer stagingBuffer;
+                VkDeviceMemory stagingBufferMemory;
+                create::buffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+                void* data;
+                hw::loc::device()->map(stagingBufferMemory, bufferSize, data);
+                /**/memcpy(data, vertices.data(), (size_t) bufferSize);
+                hw::loc::device()->unmap(stagingBufferMemory);
+
+                create::buffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buffer, bufferMemory);
+
+                hw::loc::cmd()->copyBuffer(stagingBuffer, buffer, bufferSize);
+
+                hw::loc::device()->destroy(stagingBuffer);
+                hw::loc::device()->free(stagingBufferMemory);
+            }
+
+            void indexBuffer(std::vector<uint32_t>& indeces, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+                VkDeviceSize bufferSize = sizeof(indeces[0]) * indeces.size();
+
+                VkBuffer stagingBuffer;
+                VkDeviceMemory stagingBufferMemory;
+                create::buffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+                void* data;
+                hw::loc::device()->map(stagingBufferMemory, bufferSize, data);
+                /**/memcpy(data, indeces.data(), (size_t) bufferSize);
+                hw::loc::device()->unmap(stagingBufferMemory);
+
+                create::buffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, buffer, bufferMemory);
+
+                hw::loc::cmd()->copyBuffer(stagingBuffer, buffer, bufferSize);
+
+                hw::loc::device()->destroy(stagingBuffer);
+                hw::loc::device()->free(stagingBufferMemory);
             }
 
         private:

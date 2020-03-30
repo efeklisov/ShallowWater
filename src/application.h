@@ -42,7 +42,7 @@
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
-const int MAX_FRAMES_IN_FLIGHT = 2;
+const int MAX_FRAMES_IN_FLIGHT = 3;
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -76,10 +76,16 @@ class Application {
         VkRenderPass renderPass;
         VkDescriptorSetLayout descriptorSetLayout;
 
+        size_t currentFrame = 0;
+        float currentTime = 0.0f;
         float deltaTime = 0.0f;
         float lastFrame = 0.0f;
 
+        uint32_t nbFrames = 0.0f;
+        float lastTime = 0.0f;
+
         Camera* camera;
+        glm::vec4 clipPlane = glm::vec4(0, -1, 0, 2.5);
 
         VkPipelineLayout pipelineLayout;
 
@@ -102,7 +108,6 @@ class Application {
         std::vector<VkSemaphore> renderFinishedSemaphores;
         std::vector<VkFence> inFlightFences;
         std::vector<VkFence> imagesInFlight;
-        size_t currentFrame = 0;
 
         bool framebufferResized = false;
 
@@ -111,11 +116,11 @@ class Application {
 
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-            window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+            window = glfwCreateWindow(WIDTH, HEIGHT, "Engine", nullptr, nullptr);
             glfwSetWindowUserPointer(window, this);
-            glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
-
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+            glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
             glfwSetCursorPosCallback(window, mouse_callback);
         }
 
@@ -128,6 +133,26 @@ class Application {
             auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
 
             app->camera->processMouse(xpos, ypos);
+        }
+
+        void showFPS()
+        {
+            // Measure speed
+            double currentTime = glfwGetTime();
+            double delta = currentTime - lastTime;
+            nbFrames++;
+            if ( delta >= 1.0 ){
+                double frameTime = 1000.0 / double(nbFrames);
+                double fps = double(nbFrames) / delta;
+
+                std::stringstream ss;
+                ss << "Engine : " << fps << " FPS, " << frameTime << " ms";
+
+                glfwSetWindowTitle(window, ss.str().c_str());
+
+                nbFrames = 0;
+                lastTime = currentTime;
+            }
         }
 
         void initVulkan() {
@@ -144,18 +169,18 @@ class Application {
             /**/meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
                         glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
             /**/meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
-            /**/createDescriptorSetLayout();
 
+            /**/hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
+            /**/hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
+
+            /**/createDescriptorSetLayout();
             createSwapChainRenderPass();
             createSwapChainFramebuffers();
             createSwapChainPipelines();
 
-            /**/create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
-            /**/create::indexBuffer(indices, indexBuffer, indexBufferMemory);
-
-            createUniformBuffers();
             createDescriptorPool();
             allocateDescriptorSets();
+            createUniformBuffers();
             bindUnisToDescriptorSets();
 
             hw::loc::cmd()->createCommandBuffers(hw::loc::swapChain()->size());
@@ -168,9 +193,10 @@ class Application {
             while (!glfwWindowShouldClose(window)) {
                 glfwPollEvents();
 
-                float currentFrame = glfwGetTime();
-                deltaTime = currentFrame - lastFrame;
-                lastFrame = currentFrame;
+                currentTime = glfwGetTime();
+                deltaTime = currentTime - lastFrame;
+                lastFrame = currentTime;
+                showFPS();
 
                 camera->update(deltaTime);
 
@@ -260,6 +286,33 @@ class Application {
             recordCommandBuffers();
         }
 
+        void createDescriptorSetLayout() {
+            VkDescriptorSetLayoutBinding uboLayoutBinding = {};
+            uboLayoutBinding.binding = 0;
+            uboLayoutBinding.descriptorCount = 1;
+            uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            uboLayoutBinding.pImmutableSamplers = nullptr;
+            uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+            VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
+            samplerLayoutBinding.binding = 1;
+            samplerLayoutBinding.descriptorCount = 1;
+            samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            samplerLayoutBinding.pImmutableSamplers = nullptr;
+            samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+            std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+            VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+            layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+            layoutInfo.pBindings = bindings.data();
+
+            hw::loc::device()->create(layoutInfo, descriptorSetLayout);
+
+            for (auto& mesh: meshes)
+                mesh.descriptor.layout = &descriptorSetLayout;
+        }
+
         void createSwapChainRenderPass() {
             VkAttachmentDescription colorAttachment = {};
             colorAttachment.format = hw::loc::swapChain()->format();
@@ -316,31 +369,26 @@ class Application {
             hw::loc::device()->create(renderPassInfo, renderPass);
         }
 
-        void createDescriptorSetLayout() {
-            VkDescriptorSetLayoutBinding uboLayoutBinding = {};
-            uboLayoutBinding.binding = 0;
-            uboLayoutBinding.descriptorCount = 1;
-            uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            uboLayoutBinding.pImmutableSamplers = nullptr;
-            uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        void createSwapChainFramebuffers() {
+            swapChainFramebuffers.resize(hw::loc::swapChain()->size());
 
-            VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
-            samplerLayoutBinding.binding = 1;
-            samplerLayoutBinding.descriptorCount = 1;
-            samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            samplerLayoutBinding.pImmutableSamplers = nullptr;
-            samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+                std::array<VkImageView, 2> attachments = {
+                    hw::loc::swapChain()->view(i),
+                    hw::loc::swapChain()->depthView()
+                };
 
-            std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
-            VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-            layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-            layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-            layoutInfo.pBindings = bindings.data();
+                VkFramebufferCreateInfo framebufferInfo = {};
+                framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+                framebufferInfo.renderPass = renderPass;
+                framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+                framebufferInfo.pAttachments = attachments.data();
+                framebufferInfo.width = hw::loc::swapChain()->width();
+                framebufferInfo.height = hw::loc::swapChain()->height();
+                framebufferInfo.layers = 1;
 
-            hw::loc::device()->create(layoutInfo, descriptorSetLayout);
-
-            for (auto& mesh: meshes)
-                mesh.descriptor.layout = &descriptorSetLayout;
+                hw::loc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
+            }
         }
 
         void createSwapChainPipelines() {
@@ -434,6 +482,14 @@ class Application {
             pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
             pipelineLayoutInfo.pSetLayouts = layouts.data();
 
+            VkPushConstantRange pushConstantRange {};
+			pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+			pushConstantRange.offset = 0;
+			pushConstantRange.size = sizeof(clipPlane);
+
+            pipelineLayoutInfo.pushConstantRangeCount = 1;
+            pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
             hw::loc::device()->create(pipelineLayoutInfo, pipelineLayout);
 
             VkGraphicsPipelineCreateInfo pipelineInfo = {};
@@ -469,46 +525,6 @@ class Application {
                     meshes[0].pipeline = &skyboxPipeline;
         }
 
-        void createSwapChainFramebuffers() {
-            swapChainFramebuffers.resize(hw::loc::swapChain()->size());
-
-            for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-                std::array<VkImageView, 2> attachments = {
-                    hw::loc::swapChain()->view(i),
-                    hw::loc::swapChain()->depthView()
-                };
-
-                VkFramebufferCreateInfo framebufferInfo = {};
-                framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-                framebufferInfo.renderPass = renderPass;
-                framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-                framebufferInfo.pAttachments = attachments.data();
-                framebufferInfo.width = hw::loc::swapChain()->width();
-                framebufferInfo.height = hw::loc::swapChain()->height();
-                framebufferInfo.layers = 1;
-
-                hw::loc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
-            }
-        }
-
-        bool hasStencilComponent(VkFormat format) {
-            return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
-        }
-
-        void createUniformBuffers() {
-            VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-
-            for (auto& mesh: meshes) {
-                mesh.uniform.buffers.resize(hw::loc::swapChain()->size());
-                mesh.uniform.memory.resize(hw::loc::swapChain()->size());
-
-                for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-                    create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                            | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
-                }
-            }
-        }
-
         void createDescriptorPool() {
             std::array<VkDescriptorPoolSize, 2> poolSizes = {};
             poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -537,6 +553,20 @@ class Application {
 
                 mesh.descriptor.sets.resize(hw::loc::swapChain()->size());
                 hw::loc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
+            }
+        }
+
+        void createUniformBuffers() {
+            VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+            for (auto& mesh: meshes) {
+                mesh.uniform.buffers.resize(hw::loc::swapChain()->size());
+                mesh.uniform.memory.resize(hw::loc::swapChain()->size());
+
+                for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+                    create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                            | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
+                }
             }
         }
 
@@ -607,6 +637,14 @@ class Application {
                 VkDeviceSize offsets[] = {0};
 
                 for (auto& mesh: meshes) {
+                    vkCmdPushConstants(
+                            hw::loc::cmd()->get(i),
+                            pipelineLayout,
+                            VK_SHADER_STAGE_VERTEX_BIT,
+                            0,
+                            sizeof(clipPlane),
+                            &clipPlane);
+
                     vkCmdBindDescriptorSets(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
                     vkCmdBindVertexBuffers(hw::loc::cmd()->get(i), 0, 1, &vertexBuffer, offsets);
@@ -645,22 +683,26 @@ class Application {
 
         void updateUniformBuffer(uint32_t currentImage) {
             UniformBufferObject ubo = {};
-            /* ubo.view = camera->view; */
 
+            ubo.proj = camera->proj;
+            ubo.view = camera->view;
             for (auto& mesh: meshes) {
-                ubo.proj = camera->proj;
+                glm::mat4 position;
                 glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh.rotation)));
+                glm::mat4 scale;
 
                 if (mesh.tag != "Skybox") {
-                    ubo.view = glm::translate(camera->view, mesh.transform);
-                } else ubo.view = glm::translate(camera->view, camera->cameraPos);
-                ubo.model = rotation * glm::mat4(1.0f);
+                    position = glm::translate(glm::mat4(1.0f), mesh.transform);
 
-                if (mesh.tag != "Skybox") {
-                    glm::vec3 scale = mesh.scale;
-                    scale.x *= -1;
-                    ubo.model = glm::scale(ubo.model, scale);
-                } else ubo.model = glm::scale(ubo.model, mesh.scale);
+                    glm::vec3 _scale = mesh.scale;
+                    _scale.x *= -1;
+                    scale = glm::scale(glm::mat4(1.0f), _scale);
+                } else {
+                    position = glm::translate(glm::mat4(1.0f), camera->cameraPos);
+                    scale = glm::scale(glm::mat4(1.0f), mesh.scale);
+                }
+
+                ubo.model = position * rotation * scale * glm::mat4(1.0f);
 
                 void* data;
                 hw::loc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
@@ -693,7 +735,7 @@ class Application {
             updateUniformBuffer(imageIndex);
             camera->processInput();
 
-            // Sync
+            // Sync to GPU
             if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
                 hw::loc::device()->waitFence(imagesInFlight[imageIndex]);
             }
