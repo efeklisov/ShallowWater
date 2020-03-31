@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <volk.h>
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS

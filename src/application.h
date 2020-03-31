@@ -1,6 +1,6 @@
 #pragma once
 
-#define GLFW_INCLUDE_VULKAN
+#include <volk.h>
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
@@ -85,7 +85,7 @@ class Application {
         float lastTime = 0.0f;
 
         Camera* camera;
-        glm::vec4 clipPlane = glm::vec4(0, -1, 0, 2.5);
+        glm::vec4 clipPlane = glm::vec4(0, 0, 0, 0);
 
         VkPipelineLayout pipelineLayout;
 
@@ -247,11 +247,11 @@ class Application {
 
             meshes.clear();
             delete imgui;
+            delete camera;
             delete hw::loc::cmd();
             delete hw::loc::device();
             delete hw::loc::surface();
             delete hw::loc::instance();
-            delete camera;
 
             glfwDestroyWindow(window);
 
@@ -637,13 +637,7 @@ class Application {
                 VkDeviceSize offsets[] = {0};
 
                 for (auto& mesh: meshes) {
-                    vkCmdPushConstants(
-                            hw::loc::cmd()->get(i),
-                            pipelineLayout,
-                            VK_SHADER_STAGE_VERTEX_BIT,
-                            0,
-                            sizeof(clipPlane),
-                            &clipPlane);
+                    vkCmdPushConstants(hw::loc::cmd()->get(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(clipPlane), &clipPlane);
 
                     vkCmdBindDescriptorSets(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);

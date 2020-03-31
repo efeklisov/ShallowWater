@@ -1,9 +1,11 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <volk.h>
 
 #include <vector>
 #include <set>
+
+#include <iostream>
 
 #include "locator.h"
 #include "instance.h"
@@ -99,6 +101,8 @@ namespace hw {
                 if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create logical device!");
                 }
+
+                volkLoadDevice(device);
 
                 vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
                 vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <volk.h>
 #include <GLFW/glfw3.h>
 
 #include <exception>
@@ -15,6 +15,10 @@ namespace hw {
     class Instance {
         public:
             Instance(bool _validation) : enableValidationLayers(_validation) {
+                if (volkInitialize() != VK_SUCCESS) {
+                    throw std::runtime_error("couldn't initialize Volk!");
+                }
+
                 if (enableValidationLayers && !checkValidationLayerSupport()) {
                     throw std::runtime_error("validation layers requested, but not available!");
                 }
@@ -51,6 +55,8 @@ namespace hw {
                 if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create instance!");
                 }
+
+                volkLoadInstance(instance);
 
                 if (enableValidationLayers)
                     if (CreateDebugUtilsMessengerEXT(instance, &debugCreateInfo, nullptr, &debugMessenger) != VK_SUCCESS) {

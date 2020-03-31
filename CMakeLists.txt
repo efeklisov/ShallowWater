@@ -8,11 +8,11 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g" )
 
 find_package (glfw3 3.3 REQUIRED)
 find_package (glm REQUIRED)
-find_package (vulkan REQUIRED)
 
-include_directories (src external external/imgui)
+include_directories (src external external/imgui external/volk)
 
 add_executable (engine src/main.cpp
+    external/volk/volk.c
     external/imgui/imgui.cpp 
     external/imgui/imgui_draw.cpp
     external/imgui/imgui_widgets.cpp
@@ -20,4 +20,4 @@ add_executable (engine src/main.cpp
     external/imgui/imgui_impl_glfw.cpp
     external/imgui/imgui_impl_vulkan.cpp)
 
-target_link_libraries (engine Vulkan::Vulkan glfw)
+target_link_libraries (engine glfw)
