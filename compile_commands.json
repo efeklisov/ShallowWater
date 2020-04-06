@@ -1,0 +1,150 @@
+[
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/src/main.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/src/main.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/src/main.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/cc",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-o",
+   "CMakeFiles/engine.dir/external/volk/volk.c.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/volk/volk.c"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/volk/volk.c"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui_draw.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui_draw.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui_draw.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui_widgets.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui_widgets.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui_widgets.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui_demo.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui_demo.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui_demo.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui_impl_glfw.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui_impl_glfw.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui_impl_glfw.cpp"
+ },
+ {
+  "directory": "/home/hova/Desktop/ultimate/build",
+  "arguments": [
+   "/usr/bin/c++",
+   "-I/home/hova/Desktop/ultimate/src",
+   "-I/home/hova/Desktop/ultimate/external",
+   "-I/home/hova/Desktop/ultimate/external/imgui",
+   "-I/home/hova/Desktop/ultimate/external/volk",
+   "-O3",
+   "-g",
+   "-ldl",
+   "-std=gnu++17",
+   "-o",
+   "CMakeFiles/engine.dir/external/imgui/imgui_impl_vulkan.cpp.o",
+   "-c",
+   "/home/hova/Desktop/ultimate/external/imgui/imgui_impl_vulkan.cpp"
+  ],
+  "file": "/home/hova/Desktop/ultimate/external/imgui/imgui_impl_vulkan.cpp"
+ }
+]

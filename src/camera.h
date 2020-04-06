@@ -56,6 +56,10 @@ class Camera {
                 cameraPos += absoluteUp * cameraSpeed;
             if (glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS)
                 cameraPos -= absoluteUp * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                glfwSetCursorPosCallback(window, nullptr);
+            }
         }
 
         void processMouse(double xpos, double ypos) {
@@ -80,7 +84,7 @@ class Camera {
 
         glm::mat4 view;
         glm::mat4 proj;
-        glm::vec3 cameraPos = glm::vec3(4.0f, 4.f, 7.0f);
+        glm::vec3 cameraPos = glm::vec3(0.0f, 4.f, -7.0f);
 
     private:
         GLFWwindow *window;
@@ -91,8 +95,8 @@ class Camera {
         double lastX, lastY;
 
         float yaw = 0.0f;
-        float pitch = 0.0f;
-        float roll = glm::pi<float>() / 2;
+        float pitch = glm::pi<float>() / 2;
+        float roll = 0.0f;
 
         glm::quat camera = glm::quat(glm::vec3(pitch, yaw, roll));
 };

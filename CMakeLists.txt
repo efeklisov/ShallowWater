@@ -3,8 +3,7 @@ cmake_minimum_required (VERSION 3.10)
 
 set (CMAKE_CXX_STANDARD 17)
 
-set (ENV{VK_INSTANCE_LAYERS} [VK_LAYER_LUNARG_monitor])
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g" )
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -ldl" )
 
 find_package (glfw3 3.3 REQUIRED)
 find_package (glm REQUIRED)

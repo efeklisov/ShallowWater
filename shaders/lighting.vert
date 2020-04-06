@@ -18,12 +18,18 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormals;
 layout(location = 2) in vec2 inTexCoord;
 
-layout(location = 0) out vec2 fragTexCoord;
+layout(location = 0) out vec3 fragNormals;
+layout(location = 1) out vec2 fragTexCoord;
+layout(location = 2) out vec3 fragPos;
+layout(location = 3) out vec3 fragCameraPos;
 
 void main() {
     vec4 worldPosition = ubo.model * vec4(inPosition, 1.0);
     gl_ClipDistance[0] = dot(worldPosition, pushConsts.clipPlane);
 
     gl_Position = ubo.proj * ubo.view * worldPosition;
+    fragNormals = mat3(transpose(inverse(ubo.model))) * inNormals;
     fragTexCoord = inTexCoord;
+    fragPos = worldPosition.xyz;
+    fragCameraPos = ubo.cameraPos;
 }

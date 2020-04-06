@@ -34,12 +34,18 @@ namespace read {
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
 
+                if(attrib.normals.size() != 0)
+                vertex.normals = {
+                    attrib.normals[3 * index.normal_index + 0], 
+                    attrib.normals[3 * index.normal_index + 1], 
+                    attrib.normals[3 * index.normal_index + 2]
+                };
+                else vertex.normals = {0.0f, 0.0f, 0.0f};
+
                 vertex.texCoord = {
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
-
-                vertex.color = {1.0f, 1.0f, 1.0f};
 
                 vertices.push_back(vertex);
                 indices.push_back(vertices.size() - 1);
@@ -74,7 +80,7 @@ namespace read {
     /*                 1.0f - attrib.texcoords[2 * index.texcoord_index + 1] */
     /*             }; */
 
-    /*             vertex.color = {1.0f, 1.0f, 1.0f}; */
+    /*             vertex.normals = {1.0f, 1.0f, 1.0f}; */
 
     /*             if (uniqueVertices.count(vertex) == 0) { */
     /*                 uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size()); */
