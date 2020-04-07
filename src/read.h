@@ -13,6 +13,57 @@
 #include "vertex.h"
 
 namespace read {
+    void quad(glm::vec2 dimensions, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+        std::vector<glm::vec3> generatedVertices = {
+            glm::vec3(dimensions.x / 2, dimensions.y / 2, 0.0f),
+            glm::vec3(-dimensions.x / 2, dimensions.y / 2, 0.0f),
+            glm::vec3(dimensions.x / 2, -dimensions.y / 2, 0.0f),
+            glm::vec3(-dimensions.x / 2, -dimensions.y / 2, 0.0f),
+        };
+
+        std::vector<glm::vec2> generatedTex = {
+            glm::vec2(0.0, 0.0),
+            glm::vec2(1.0, 0.0),
+            glm::vec2(0.0, 1.0),
+            glm::vec2(1.0, 1.0),
+        };
+
+        std::vector<uint32_t> generatedIndeces = {
+            0, 1, 2,
+            1, 2, 3,
+            0, 2, 1,
+            1, 3, 2,
+        };
+
+        for (auto& elem: generatedIndeces) {
+            Vertex vertex = {};
+
+            vertex.pos = generatedVertices[elem];
+
+            vertex.texCoord = generatedTex[elem];
+
+            vertex.normals = {0.0f, 0.0f, 0.0f};
+
+            vertices.push_back(vertex);
+            indices.push_back(vertices.size() - 1);
+        }
+    }
+
+    void quad(glm::vec2 dimensions, std::vector<Vertex>& vertices,
+            std::vector<uint32_t>& indices, uint32_t& start, uint32_t& size) {
+
+        std::vector<Vertex> _vertices;
+        std::vector<uint32_t> _indices;
+
+        quad(dimensions, _vertices, _indices);
+
+        size = _indices.size();
+        start = vertices.size();
+
+        vertices.insert(vertices.end(), _vertices.begin(), _vertices.end());
+        indices.insert(indices.end(), _indices.begin(), _indices.end());
+    }
+
     void model(std::string_view filename, std::vector<Vertex>& vertices, 
             std::vector<uint32_t>& indices) {
         tinyobj::attrib_t attrib;

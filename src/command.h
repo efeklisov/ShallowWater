@@ -27,10 +27,6 @@ namespace hw {
                 hw::loc::device()->destroy(commandPool);
             }
 
-            VkCommandBuffer& get(uint32_t index) {
-                return commandBuffers[index];
-            }
-
             void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, int layerCount=1) {
                 VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
@@ -111,8 +107,7 @@ namespace hw {
                 endSingleTimeCommands(commandBuffer);
             }
 
-
-            void createCommandBuffers(uint32_t size) {
+            void createCommandBuffers(std::vector<VkCommandBuffer>& commandBuffers, uint32_t size) {
                 commandBuffers.resize(size);
 
                 VkCommandBufferAllocateInfo allocInfo = {};
@@ -124,7 +119,7 @@ namespace hw {
                 hw::loc::device()->allocate(allocInfo, commandBuffers.data());
             }
 
-            void freeCommandBuffers() {
+            void freeCommandBuffers(std::vector<VkCommandBuffer>& commandBuffers) {
                 hw::loc::device()->free(commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
             }
 
@@ -213,6 +208,5 @@ namespace hw {
             }
 
             VkCommandPool commandPool;
-            std::vector<VkCommandBuffer> commandBuffers;
     };
 }

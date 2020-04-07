@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <iostream>
 #include <memory>
 
 #include "image.h"
@@ -15,19 +16,31 @@
 #include "read.h"
 
 struct Mesh {
+    Mesh(std::string_view _tag, glm::vec2 _dimensions,
+            glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3 _scale=glm::vec3(1.0f, 1.0f, 1.0f))
+        : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
+
+            read::quad(_dimensions, hw::loc::vertices(), hw::loc::indices(), vertex.start, vertex.size);
+            simple = true;
+        }
+
     Mesh(std::string_view _tag, std::string_view model, std::unique_ptr<Image> _texture,
             glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
             glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
             glm::vec3 _scale=glm::vec3(1.0f, 1.0f, 1.0f))
-    : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
+        : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
 
-        texture = std::move(_texture);
-        read::model(model.data(), hw::loc::vertices(), hw::loc::indices(), vertex.start, vertex.size);
-    }
+            texture = std::move(_texture);
+            read::model(model.data(), hw::loc::vertices(), hw::loc::indices(), vertex.start, vertex.size);
+        }
 
+    bool simple = false;
     std::string tag;
 
     std::unique_ptr<Image> texture;
+
     VkPipeline* pipeline;
 
     glm::vec3 transform;
@@ -40,8 +53,8 @@ struct Mesh {
     } vertex;
 
     struct DescriptorData {
-        VkDescriptorSetLayout* layout;
         std::vector<VkDescriptorSet> sets;
+        VkDescriptorSetLayout* layout;
     } descriptor;
 
     struct UniformData {

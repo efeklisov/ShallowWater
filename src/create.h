@@ -31,7 +31,7 @@ namespace create {
         hw::loc::device()->bind(buffer, bufferMemory);
     }
 
-    VkImageView imageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, int layerCount=1, VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D) {
+    VkImageView imageView(VkImage& image, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB, VkImageAspectFlags aspectFlags=VK_IMAGE_ASPECT_COLOR_BIT, int layerCount=1, VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D) {
         VkImageViewCreateInfo viewInfo = {};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
@@ -47,6 +47,25 @@ namespace create {
         hw::loc::device()->create(viewInfo, imageView);
 
         return imageView;
+    }
+
+    void sampler(VkSampler& sampler, VkSamplerAddressMode addressMode=VK_SAMPLER_ADDRESS_MODE_REPEAT) {
+        VkSamplerCreateInfo samplerInfo = {};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU = addressMode;
+        samplerInfo.addressModeV = addressMode;
+        samplerInfo.addressModeW = addressMode;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = 16;
+        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+        hw::loc::device()->create(samplerInfo, sampler);
     }
 
     void cubemap(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
@@ -82,7 +101,7 @@ namespace create {
         hw::loc::device()->bind(image, imageMemory);
     }
 
-    void image(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+    void image(uint32_t width, uint32_t height, VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& imageMemory, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB) {
         VkImageCreateInfo imageInfo = {};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -92,7 +111,7 @@ namespace create {
         imageInfo.mipLevels = 1;
         imageInfo.arrayLayers = 1;
         imageInfo.format = format;
-        imageInfo.tiling = tiling;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         imageInfo.usage = usage;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -106,7 +125,7 @@ namespace create {
         VkMemoryAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = hw::loc::device()->find(memRequirements.memoryTypeBits, properties);
+        allocInfo.memoryTypeIndex = hw::loc::device()->find(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         hw::loc::device()->allocate(allocInfo, imageMemory);
 

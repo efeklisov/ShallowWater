@@ -12,6 +12,7 @@
 #include "locator.h"
 #include "device.h"
 #include "swapchain.h"
+#include "command.h"
 
 class ImGuiImpl {
     public:
@@ -33,7 +34,7 @@ class ImGuiImpl {
                 hw::loc::device()->destroy(framebuffer);
             }
 
-            imguicmd->freeCommandBuffers();
+            imguicmd->freeCommandBuffers(commandBuffers);
             hw::loc::device()->destroy(imguiRenderPass);
         }
 
@@ -41,18 +42,18 @@ class ImGuiImpl {
             createImguiRenderPass();
             createImguiFramebuffers();
 
-            imguicmd->createCommandBuffers(hw::loc::swapChain()->size());
+            imguicmd->createCommandBuffers(commandBuffers, hw::loc::swapChain()->size());
         }
 
         VkCommandBuffer& getCommandBuffer(uint32_t index) {
-            return imguicmd->get(index);
+            return commandBuffers[index];
         }
 
         void recordCommandBuffer(uint32_t imageIndex) {
             VkCommandBufferBeginInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            if (vkBeginCommandBuffer(imguicmd->get(imageIndex), &info) != VK_SUCCESS) {
+            if (vkBeginCommandBuffer(commandBuffers[imageIndex], &info) != VK_SUCCESS) {
                 throw std::runtime_error("failed to begin imgui command buffer");
             }
 
@@ -68,12 +69,12 @@ class ImGuiImpl {
 
             beginInfo.clearValueCount = 1;
             beginInfo.pClearValues = &clearValue;
-            vkCmdBeginRenderPass(imguicmd->get(imageIndex), &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(commandBuffers[imageIndex], &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), imguicmd->get(imageIndex));
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffers[imageIndex]);
 
-            vkCmdEndRenderPass(imguicmd->get(imageIndex));
-            if (vkEndCommandBuffer(imguicmd->get(imageIndex)) != VK_SUCCESS) {
+            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+            if (vkEndCommandBuffer(commandBuffers[imageIndex]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to end imgui command buffer");
             }
         }
@@ -84,6 +85,7 @@ class ImGuiImpl {
         VkRenderPass imguiRenderPass;
         hw::Command* imguicmd;
         VkDescriptorPool imguiDescriptorPool;
+        std::vector<VkCommandBuffer> commandBuffers;
 
         void initImgui() {
             IMGUI_CHECKVERSION();
@@ -116,7 +118,7 @@ class ImGuiImpl {
             ImGui_ImplVulkan_DestroyFontUploadObjects();
 
             imguicmd = new hw::Command(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-            imguicmd->createCommandBuffers(hw::loc::swapChain()->size());
+            imguicmd->createCommandBuffers(commandBuffers, hw::loc::swapChain()->size());
         }
 
         void createImguiFramebuffers() {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <volk.h>
+
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
@@ -32,6 +33,7 @@
 #include "locator.h"
 #include "mesh.h"
 #include "read.h"
+#include "render.h"
 #include "shader.h"
 #include "surface.h"
 #include "swapchain.h"
@@ -60,7 +62,7 @@ struct PushConstants {
     alignas(4) glm::vec4 clipPlane = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
     alignas(4) glm::vec3 lightSource = glm::vec3(0.0f, 6.0f, -3.0f);
     alignas(4) glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
-} pushConstants;
+};
 
 class Application {
 public:
@@ -78,9 +80,46 @@ private:
     GLFWwindow* window;
     ImGuiImpl* imgui;
 
-    std::vector<VkFramebuffer> swapChainFramebuffers;
+    struct StructRender {
+        struct StructRefraction {
+            VkRenderPass pass;
 
-    VkRenderPass renderPass;
+            struct StructPipeline {
+                VkPipeline base;
+                VkPipeline lighting;
+                VkPipeline skybox;
+            } pipeline;
+
+            render::FBO* frameBuffer;
+            std::vector<VkCommandBuffer> commandBuffers;
+        } refraction;
+
+        struct StructReflection {
+            VkRenderPass pass;
+
+            struct StructPipeline {
+                VkPipeline base;
+                VkPipeline lighting;
+                VkPipeline skybox;
+            } pipeline;
+
+            render::FBO* frameBuffer;
+            std::vector<VkCommandBuffer> commandBuffers;
+        } reflection;
+
+        struct StructWater {
+            VkRenderPass pass;
+
+            struct StructPipeline {
+                VkPipeline base;
+                VkPipeline lighting;
+                VkPipeline skybox;
+            } pipeline;
+
+            std::vector<VkCommandBuffer> commandBuffers;
+        } water;
+    } render;
+
     VkDescriptorSetLayout descriptorSetLayout;
 
     size_t currentFrame = 0;
@@ -94,10 +133,6 @@ private:
     Camera* camera;
 
     VkPipelineLayout pipelineLayout;
-
-    VkPipeline basePipeline;
-    VkPipeline lightingPipeline;
-    VkPipeline skyboxPipeline;
 
     std::vector<Mesh> meshes;
 
@@ -180,23 +215,46 @@ private:
         /**/ meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
             glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
         /**/ meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
+        meshes.push_back(Mesh("Quad1", glm::vec2(6.0f, 4.0f), glm::vec3(4.0f, 6.0f, 0.0f)));
+        meshes.push_back(Mesh("Quad2", glm::vec2(6.0f, 4.0f), glm::vec3(-4.0f, 6.0f, 0.0f)));
 
         /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
         /**/ hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
 
         /**/ createLayouts();
 
-        createSwapChainRenderPass();
-        createSwapChainFramebuffers();
-        createSwapChainPipelines();
+        render::pass(render.refraction.pass, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        render::pass(render.reflection.pass, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        render::pass(render.water.pass);
+
+        render::defaultFBO(render.water.pass);
+        render.refraction.frameBuffer = new render::FBO(&render.refraction.pass);
+        render.reflection.frameBuffer = new render::FBO(&render.reflection.pass);
+
+        render::pipeline(render.water.pipeline.base, render.water.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.water.pipeline.lighting, render.water.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.water.pipeline.skybox, render.water.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+
+        render::pipeline(render.refraction.pipeline.base, render.refraction.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.refraction.pipeline.lighting, render.refraction.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.refraction.pipeline.skybox, render.refraction.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+
+        render::pipeline(render.reflection.pipeline.base, render.reflection.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.reflection.pipeline.lighting, render.reflection.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.reflection.pipeline.skybox, render.reflection.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
 
         createDescriptorPool();
         allocateDescriptorSets();
         createUniformBuffers();
         bindUnisToDescriptorSets();
 
-        hw::loc::cmd()->createCommandBuffers(hw::loc::swapChain()->size());
-        recordCommandBuffers();
+        hw::loc::cmd()->createCommandBuffers(render.water.commandBuffers, hw::loc::swapChain()->size());
+        hw::loc::cmd()->createCommandBuffers(render.refraction.commandBuffers, hw::loc::swapChain()->size());
+        hw::loc::cmd()->createCommandBuffers(render.reflection.commandBuffers, hw::loc::swapChain()->size());
+
+        recordWaterCommandBuffers();
+        recordRefractionCommandBuffers();
+        recordReflectionCommandBuffers();
 
         /**/ createSyncObjects();
     }
@@ -221,18 +279,28 @@ private:
 
     void cleanupSwapChain()
     {
-        for (auto framebuffer : swapChainFramebuffers) {
-            hw::loc::device()->destroy(framebuffer);
-        }
+        hw::loc::cmd()->freeCommandBuffers(render.reflection.commandBuffers);
+        hw::loc::cmd()->freeCommandBuffers(render.refraction.commandBuffers);
+        hw::loc::cmd()->freeCommandBuffers(render.water.commandBuffers);
 
-        hw::loc::cmd()->freeCommandBuffers();
+        hw::loc::device()->destroy(render.reflection.pipeline.skybox);
+        hw::loc::device()->destroy(render.reflection.pipeline.lighting);
+        hw::loc::device()->destroy(render.reflection.pipeline.base);
 
-        hw::loc::device()->destroy(basePipeline);
-        hw::loc::device()->destroy(lightingPipeline);
-        hw::loc::device()->destroy(skyboxPipeline);
+        hw::loc::device()->destroy(render.refraction.pipeline.skybox);
+        hw::loc::device()->destroy(render.refraction.pipeline.lighting);
+        hw::loc::device()->destroy(render.refraction.pipeline.base);
 
-        hw::loc::device()->destroy(pipelineLayout);
-        hw::loc::device()->destroy(renderPass);
+        hw::loc::device()->destroy(render.water.pipeline.skybox);
+        hw::loc::device()->destroy(render.water.pipeline.lighting);
+        hw::loc::device()->destroy(render.water.pipeline.base);
+
+        delete render.refraction.frameBuffer;
+        delete render.reflection.frameBuffer;
+
+        hw::loc::device()->destroy(render.reflection.pass);
+        hw::loc::device()->destroy(render.refraction.pass);
+        hw::loc::device()->destroy(render.water.pass);
 
         imgui->cleanup();
         delete hw::loc::swapChain();
@@ -248,6 +316,7 @@ private:
         cleanupSwapChain();
 
         hw::loc::device()->destroy(descriptorSetLayout);
+        hw::loc::device()->destroy(pipelineLayout);
 
         hw::loc::device()->destroy(indexBuffer);
         hw::loc::device()->free(indexBufferMemory);
@@ -288,9 +357,26 @@ private:
         cleanupSwapChain();
 
         hw::loc::provide(new hw::SwapChain(window));
-        createSwapChainRenderPass();
-        createSwapChainFramebuffers();
-        createSwapChainPipelines();
+
+        render::pass(render.refraction.pass);
+        render::pass(render.reflection.pass);
+        render::pass(render.water.pass);
+
+        render::defaultFBO(render.water.pass);
+        render.refraction.frameBuffer = new render::FBO(&render.refraction.pass);
+        render.reflection.frameBuffer = new render::FBO(&render.reflection.pass);
+
+        render::pipeline(render.water.pipeline.base, render.water.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.water.pipeline.lighting, render.water.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.water.pipeline.skybox, render.water.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+
+        render::pipeline(render.refraction.pipeline.base, render.refraction.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.refraction.pipeline.lighting, render.refraction.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.refraction.pipeline.skybox, render.refraction.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+
+        render::pipeline(render.reflection.pipeline.base, render.reflection.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+        render::pipeline(render.reflection.pipeline.lighting, render.reflection.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        render::pipeline(render.reflection.pipeline.skybox, render.reflection.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
 
         createUniformBuffers();
         createDescriptorPool();
@@ -299,8 +385,13 @@ private:
 
         imgui->adjust();
 
-        hw::loc::cmd()->createCommandBuffers(hw::loc::swapChain()->size());
-        recordCommandBuffers();
+        hw::loc::cmd()->createCommandBuffers(render.water.commandBuffers, hw::loc::swapChain()->size());
+        hw::loc::cmd()->createCommandBuffers(render.refraction.commandBuffers, hw::loc::swapChain()->size());
+        hw::loc::cmd()->createCommandBuffers(render.reflection.commandBuffers, hw::loc::swapChain()->size());
+
+        recordWaterCommandBuffers();
+        recordRefractionCommandBuffers();
+        recordReflectionCommandBuffers();
     }
 
     void createLayouts()
@@ -339,7 +430,7 @@ private:
         pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
         pipelineLayoutInfo.pSetLayouts = layouts.data();
 
-        VkPushConstantRange pushConstantRanges = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants)};
+        VkPushConstantRange pushConstantRanges = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants) };
 
         pipelineLayoutInfo.pushConstantRangeCount = 1;
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRanges;
@@ -347,217 +438,13 @@ private:
         hw::loc::device()->create(pipelineLayoutInfo, pipelineLayout);
     }
 
-    void createSwapChainRenderPass()
-    {
-        VkAttachmentDescription colorAttachment = {};
-        colorAttachment.format = hw::loc::swapChain()->format();
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentDescription depthAttachment = {};
-        depthAttachment.format = hw::loc::swapChain()->findDepthFormat();
-        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentReference colorAttachmentRef = {};
-        colorAttachmentRef.attachment = 0;
-        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentReference depthAttachmentRef = {};
-        depthAttachmentRef.attachment = 1;
-        depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass = {};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorAttachmentRef;
-        subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-        VkSubpassDependency dependency = {};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-        renderPassInfo.pAttachments = attachments.data();
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
-
-        hw::loc::device()->create(renderPassInfo, renderPass);
-    }
-
-    void createSwapChainFramebuffers()
-    {
-        swapChainFramebuffers.resize(hw::loc::swapChain()->size());
-
-        for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-            std::array<VkImageView, 2> attachments = {
-                hw::loc::swapChain()->view(i),
-                hw::loc::swapChain()->depthView()
-            };
-
-            VkFramebufferCreateInfo framebufferInfo = {};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = renderPass;
-            framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-            framebufferInfo.pAttachments = attachments.data();
-            framebufferInfo.width = hw::loc::swapChain()->width();
-            framebufferInfo.height = hw::loc::swapChain()->height();
-            framebufferInfo.layers = 1;
-
-            hw::loc::device()->create(framebufferInfo, swapChainFramebuffers[i]);
-        }
-    }
-
-    void createSwapChainPipelines()
-    {
-        Shader vertBase("shaders/base.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        Shader fragBase("shaders/base.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-        Shader vertLighting("shaders/lighting.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        Shader fragLighting("shaders/lighting.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-        Shader vertSkybox("shaders/skybox.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        Shader fragSkybox("shaders/skybox.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        VkPipelineShaderStageCreateInfo shaderStages[] = { vertSkybox.info(), fragSkybox.info() };
-
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
-        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-        auto bindingDescription = Vertex::getBindingDescription();
-        auto attributeDescriptions = Vertex::getAttributeDescriptions();
-
-        vertexInputInfo.vertexBindingDescriptionCount = 1;
-        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
-
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
-        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-        VkViewport viewport = {};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = (float)hw::loc::swapChain()->width();
-        viewport.height = (float)hw::loc::swapChain()->height();
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-
-        VkRect2D scissor = {};
-        scissor.offset = { 0, 0 };
-        scissor.extent = hw::loc::swapChain()->extent();
-
-        VkPipelineViewportStateCreateInfo viewportState = {};
-        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewportState.viewportCount = 1;
-        viewportState.pViewports = &viewport;
-        viewportState.scissorCount = 1;
-        viewportState.pScissors = &scissor;
-
-        VkPipelineRasterizationStateCreateInfo rasterizer = {};
-        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterizer.depthClampEnable = VK_FALSE;
-        rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        rasterizer.depthBiasEnable = VK_FALSE;
-
-        VkPipelineMultisampleStateCreateInfo multisampling = {};
-        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.sampleShadingEnable = VK_FALSE;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-        VkPipelineDepthStencilStateCreateInfo depthStencil = {};
-        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-        depthStencil.depthTestEnable = VK_FALSE;
-        depthStencil.depthWriteEnable = VK_FALSE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-        depthStencil.depthBoundsTestEnable = VK_FALSE;
-        depthStencil.stencilTestEnable = VK_FALSE;
-
-        VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
-        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = VK_FALSE;
-
-        VkPipelineColorBlendStateCreateInfo colorBlending = {};
-        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlending.logicOpEnable = VK_FALSE;
-        colorBlending.logicOp = VK_LOGIC_OP_COPY;
-        colorBlending.attachmentCount = 1;
-        colorBlending.pAttachments = &colorBlendAttachment;
-        colorBlending.blendConstants[0] = 0.0f;
-        colorBlending.blendConstants[1] = 0.0f;
-        colorBlending.blendConstants[2] = 0.0f;
-        colorBlending.blendConstants[3] = 0.0f;
-
-        VkGraphicsPipelineCreateInfo pipelineInfo = {};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipelineInfo.stageCount = 2;
-        pipelineInfo.pStages = shaderStages;
-        pipelineInfo.pVertexInputState = &vertexInputInfo;
-        pipelineInfo.pInputAssemblyState = &inputAssembly;
-        pipelineInfo.pViewportState = &viewportState;
-        pipelineInfo.pRasterizationState = &rasterizer;
-        pipelineInfo.pMultisampleState = &multisampling;
-        pipelineInfo.pDepthStencilState = &depthStencil;
-        pipelineInfo.pColorBlendState = &colorBlending;
-        pipelineInfo.layout = pipelineLayout;
-        pipelineInfo.renderPass = renderPass;
-        pipelineInfo.subpass = 0;
-        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-
-        hw::loc::device()->create(pipelineInfo, skyboxPipeline);
-
-        shaderStages[0] = vertLighting.info();
-        shaderStages[1] = fragLighting.info();
-
-        depthStencil.depthWriteEnable = VK_TRUE;
-        depthStencil.depthTestEnable = VK_TRUE;
-
-        hw::loc::device()->create(pipelineInfo, lightingPipeline);
-
-        shaderStages[0] = vertBase.info();
-        shaderStages[1] = fragBase.info();
-
-        hw::loc::device()->create(pipelineInfo, basePipeline);
-
-        for (auto& mesh : meshes)
-            if (mesh.tag == "Skybox")
-                mesh.pipeline = &skyboxPipeline;
-            else if (mesh.tag == "Chalet")
-                mesh.pipeline = &basePipeline;
-            else
-                mesh.pipeline = &lightingPipeline;
-    }
-
     void createDescriptorPool()
     {
         std::array<VkDescriptorPoolSize, 2> poolSizes = {};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
 
         VkDescriptorPoolCreateInfo poolInfo = {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -630,28 +517,36 @@ private:
 
                 bufferInfo.buffer = mesh.uniform.buffers[i];
 
-                imageInfo.imageView = mesh.texture->view();
-                imageInfo.sampler = mesh.texture->sampler();
+                if (mesh.tag == "Quad1") {
+                    imageInfo.imageView = render.refraction.frameBuffer->colorView(i);
+                    imageInfo.sampler = render.refraction.frameBuffer->colorSampler(i);
+                } else if (mesh.tag == "Quad2") {
+                    imageInfo.imageView = render.reflection.frameBuffer->colorView(i);
+                    imageInfo.sampler = render.reflection.frameBuffer->colorSampler(i);
+                } else {
+                    imageInfo.imageView = mesh.texture->view();
+                    imageInfo.sampler = mesh.texture->sampler();
+                }
 
                 hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
             }
         }
     }
 
-    void recordCommandBuffers()
+    void recordWaterCommandBuffers()
     {
-        for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
             VkCommandBufferBeginInfo beginInfo = {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-            if (vkBeginCommandBuffer(hw::loc::cmd()->get(i), &beginInfo) != VK_SUCCESS) {
+            if (vkBeginCommandBuffer(render.water.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
                 throw std::runtime_error("failed to begin recording command buffer!");
             }
 
             VkRenderPassBeginInfo renderPassInfo = {};
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = renderPass;
-            renderPassInfo.framebuffer = swapChainFramebuffers[i];
+            renderPassInfo.renderPass = render.water.pass;
+            renderPassInfo.framebuffer = hw::loc::swapChain()->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
             renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
 
@@ -662,24 +557,159 @@ private:
             renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
             renderPassInfo.pClearValues = clearValues.data();
 
-            vkCmdBeginRenderPass(hw::loc::cmd()->get(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(render.water.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             VkDeviceSize offsets[] = { 0 };
 
-            for (auto& mesh : meshes) {
-                vkCmdPushConstants(hw::loc::cmd()->get(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushConstants), &pushConstants);
+            PushConstants pushConstants;
 
-                vkCmdBindDescriptorSets(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+            for (auto& mesh : meshes) {
+                vkCmdPushConstants(render.water.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+
+                vkCmdBindDescriptorSets(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
                     pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(hw::loc::cmd()->get(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(hw::loc::cmd()->get(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdBindPipeline(hw::loc::cmd()->get(i), VK_PIPELINE_BIND_POINT_GRAPHICS, *mesh.pipeline);
-                vkCmdDrawIndexed(hw::loc::cmd()->get(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdBindVertexBuffers(render.water.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(render.water.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+                if (mesh.tag == "Chalet" || mesh.tag == "Quad1" || mesh.tag == "Quad2")
+                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.base);
+                else if (mesh.tag == "Skybox")
+                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.skybox);
+                else
+                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.lighting);
+
+                vkCmdDrawIndexed(render.water.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(hw::loc::cmd()->get(i));
+            vkCmdEndRenderPass(render.water.commandBuffers[i]);
 
-            if (vkEndCommandBuffer(hw::loc::cmd()->get(i)) != VK_SUCCESS) {
+            if (vkEndCommandBuffer(render.water.commandBuffers[i]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to record command buffer!");
+            }
+        }
+    }
+
+    void recordRefractionCommandBuffers()
+    {
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+            VkCommandBufferBeginInfo beginInfo = {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+            if (vkBeginCommandBuffer(render.refraction.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+                throw std::runtime_error("failed to begin recording command buffer!");
+            }
+
+            VkRenderPassBeginInfo renderPassInfo = {};
+            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassInfo.renderPass = render.refraction.pass;
+            renderPassInfo.framebuffer = render.refraction.frameBuffer->get(i);
+            renderPassInfo.renderArea.offset = { 0, 0 };
+            renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
+
+            std::array<VkClearValue, 2> clearValues = {};
+            clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            clearValues[1].depthStencil = { 1.0f, 0 };
+
+            renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+            renderPassInfo.pClearValues = clearValues.data();
+
+            vkCmdBeginRenderPass(render.refraction.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            VkDeviceSize offsets[] = { 0 };
+
+            PushConstants pushConstants;
+            pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
+
+            for (auto& mesh : meshes) {
+                if (mesh.tag == "Quad1")
+                    continue;
+
+                if (mesh.tag == "Quad2")
+                    continue;
+
+                vkCmdPushConstants(render.refraction.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+
+                vkCmdBindDescriptorSets(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                vkCmdBindVertexBuffers(render.refraction.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(render.refraction.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+                if (mesh.tag == "Chalet")
+                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.base);
+                else if (mesh.tag == "Skybox")
+                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.skybox);
+                else
+                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.lighting);
+
+                vkCmdDrawIndexed(render.refraction.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+            }
+
+            vkCmdEndRenderPass(render.refraction.commandBuffers[i]);
+
+            if (vkEndCommandBuffer(render.refraction.commandBuffers[i]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to record command buffer!");
+            }
+        }
+    }
+
+    void recordReflectionCommandBuffers()
+    {
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+            VkCommandBufferBeginInfo beginInfo = {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+            if (vkBeginCommandBuffer(render.reflection.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+                throw std::runtime_error("failed to begin recording command buffer!");
+            }
+
+            VkRenderPassBeginInfo renderPassInfo = {};
+            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassInfo.renderPass = render.reflection.pass;
+            renderPassInfo.framebuffer = render.reflection.frameBuffer->get(i);
+            renderPassInfo.renderArea.offset = { 0, 0 };
+            renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
+
+            std::array<VkClearValue, 2> clearValues = {};
+            clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            clearValues[1].depthStencil = { 1.0f, 0 };
+
+            renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+            renderPassInfo.pClearValues = clearValues.data();
+
+            vkCmdBeginRenderPass(render.reflection.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            VkDeviceSize offsets[] = { 0 };
+
+            PushConstants pushConstants;
+            pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
+
+            for (auto& mesh : meshes) {
+                if (mesh.tag == "Quad1")
+                    continue;
+
+                if (mesh.tag == "Quad2")
+                    continue;
+
+                vkCmdPushConstants(render.reflection.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+
+                vkCmdBindDescriptorSets(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                vkCmdBindVertexBuffers(render.reflection.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(render.reflection.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+                if (mesh.tag == "Chalet")
+                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.base);
+                else if (mesh.tag == "Skybox")
+                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.skybox);
+                else
+                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.lighting);
+
+                vkCmdDrawIndexed(render.reflection.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+            }
+
+            vkCmdEndRenderPass(render.reflection.commandBuffers[i]);
+
+            if (vkEndCommandBuffer(render.reflection.commandBuffers[i]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to record command buffer!");
             }
         }
@@ -774,8 +804,10 @@ private:
         imgui->recordCommandBuffer(imageIndex);
 
         // Submit
-        std::array<VkCommandBuffer, 2> submitCommandBuffers = {
-            hw::loc::cmd()->get(imageIndex),
+        std::array<VkCommandBuffer, 4> submitCommandBuffers = {
+            render.refraction.commandBuffers[imageIndex],
+            render.reflection.commandBuffers[imageIndex],
+            render.water.commandBuffers[imageIndex],
             imgui->getCommandBuffer(imageIndex)
         };
 
