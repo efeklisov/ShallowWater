@@ -20,9 +20,11 @@ public:
 
     ~SwapChain()
     {
-        hw::loc::device()->destroy(depthImageView);
-        hw::loc::device()->destroy(depthImage);
-        hw::loc::device()->free(depthImageMemory);
+        for (uint32_t i = 0; i < depthImages.size(); i++) {
+            hw::loc::device()->destroy(depthImageViews[i]);
+            hw::loc::device()->destroy(depthImages[i]);
+            hw::loc::device()->free(depthImageMemorys[i]);
+        }
 
         for (auto framebuffer : swapChainFramebuffers) {
             hw::loc::device()->destroy(framebuffer);
@@ -76,9 +78,9 @@ public:
     }
 
 
-    VkImageView& depthView()
+    VkImageView& depthView(uint32_t index)
     {
-        return depthImageView;
+        return depthImageViews[index];
     }
 
     VkExtent2D& extent()
@@ -97,15 +99,15 @@ public:
 private:
     GLFWwindow* window;
     VkSwapchainKHR swapChain;
-    std::vector<VkImage> swapChainImages;
     VkExtent2D swapChainExtent;
     VkFormat swapChainImageFormat;
+    std::vector<VkImage> swapChainImages;
     std::vector<VkImageView> swapChainImageViews;
     std::vector<VkFramebuffer> swapChainFramebuffers;
 
-    VkImage depthImage;
-    VkDeviceMemory depthImageMemory;
-    VkImageView depthImageView;
+    std::vector<VkImage> depthImages;
+    std::vector<VkImageView> depthImageViews;
+    std::vector<VkDeviceMemory> depthImageMemorys;
 
     void createSwapChain()
     {
@@ -215,8 +217,14 @@ private:
     {
         VkFormat depthFormat = findDepthFormat();
 
-        create::image(width(), height(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImage, depthImageMemory, depthFormat);
-        depthImageView = create::imageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+        depthImages.resize(swapChainImages.size());
+        depthImageViews.resize(swapChainImages.size());
+        depthImageMemorys.resize(swapChainImages.size());
+
+        for (uint32_t i = 0; i < swapChainImages.size(); i++) {
+            create::image(width(), height(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImages[i], depthImageMemorys[i], depthFormat);
+            depthImageViews[i] = create::imageView(depthImages[i], depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+        }
     }
 };
 }

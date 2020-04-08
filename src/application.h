@@ -80,45 +80,9 @@ private:
     GLFWwindow* window;
     ImGuiImpl* imgui;
 
-    struct StructRender {
-        struct StructRefraction {
-            VkRenderPass pass;
-
-            struct StructPipeline {
-                VkPipeline base;
-                VkPipeline lighting;
-                VkPipeline skybox;
-            } pipeline;
-
-            render::FBO* frameBuffer;
-            std::vector<VkCommandBuffer> commandBuffers;
-        } refraction;
-
-        struct StructReflection {
-            VkRenderPass pass;
-
-            struct StructPipeline {
-                VkPipeline base;
-                VkPipeline lighting;
-                VkPipeline skybox;
-            } pipeline;
-
-            render::FBO* frameBuffer;
-            std::vector<VkCommandBuffer> commandBuffers;
-        } reflection;
-
-        struct StructWater {
-            VkRenderPass pass;
-
-            struct StructPipeline {
-                VkPipeline base;
-                VkPipeline lighting;
-                VkPipeline skybox;
-            } pipeline;
-
-            std::vector<VkCommandBuffer> commandBuffers;
-        } water;
-    } render;
+    Render* water;
+    Render* refraction;
+    Render* reflection;
 
     VkDescriptorSetLayout descriptorSetLayout;
 
@@ -215,42 +179,32 @@ private:
         /**/ meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
             glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
         /**/ meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
-        meshes.push_back(Mesh("Quad1", glm::vec2(6.0f, 4.0f), glm::vec3(4.0f, 6.0f, 0.0f)));
-        meshes.push_back(Mesh("Quad2", glm::vec2(6.0f, 4.0f), glm::vec3(-4.0f, 6.0f, 0.0f)));
+        /**/meshes.push_back(Mesh("Quad1", glm::vec2(6.0f, 4.0f), glm::vec3(4.0f, 6.0f, 0.0f)));
+        /**/meshes.push_back(Mesh("Quad2", glm::vec2(6.0f, 4.0f), glm::vec3(-4.0f, 6.0f, 0.0f)));
 
         /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
         /**/ hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
 
         /**/ createLayouts();
 
-        render::pass(render.refraction.pass, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        render::pass(render.reflection.pass, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        render::pass(render.water.pass);
+        water = new Render("water");
+        refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        reflection = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        render::defaultFBO(render.water.pass);
-        render.refraction.frameBuffer = new render::FBO(&render.refraction.pass);
-        render.reflection.frameBuffer = new render::FBO(&render.reflection.pass);
+        water->setToDefaultFBO();
+        reflection->initFBO();
+        refraction->initFBO();
 
-        render::pipeline(render.water.pipeline.base, render.water.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.water.pipeline.lighting, render.water.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.water.pipeline.skybox, render.water.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-
-        render::pipeline(render.refraction.pipeline.base, render.refraction.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.refraction.pipeline.lighting, render.refraction.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.refraction.pipeline.skybox, render.refraction.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-
-        render::pipeline(render.reflection.pipeline.base, render.reflection.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.reflection.pipeline.lighting, render.reflection.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.reflection.pipeline.skybox, render.reflection.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+        for (auto& render: {water, refraction, reflection}) {
+            render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+            render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+            render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        }
 
         createDescriptorPool();
         allocateDescriptorSets();
         createUniformBuffers();
         bindUnisToDescriptorSets();
-
-        hw::loc::cmd()->createCommandBuffers(render.water.commandBuffers, hw::loc::swapChain()->size());
-        hw::loc::cmd()->createCommandBuffers(render.refraction.commandBuffers, hw::loc::swapChain()->size());
-        hw::loc::cmd()->createCommandBuffers(render.reflection.commandBuffers, hw::loc::swapChain()->size());
 
         recordWaterCommandBuffers();
         recordRefractionCommandBuffers();
@@ -279,28 +233,9 @@ private:
 
     void cleanupSwapChain()
     {
-        hw::loc::cmd()->freeCommandBuffers(render.reflection.commandBuffers);
-        hw::loc::cmd()->freeCommandBuffers(render.refraction.commandBuffers);
-        hw::loc::cmd()->freeCommandBuffers(render.water.commandBuffers);
-
-        hw::loc::device()->destroy(render.reflection.pipeline.skybox);
-        hw::loc::device()->destroy(render.reflection.pipeline.lighting);
-        hw::loc::device()->destroy(render.reflection.pipeline.base);
-
-        hw::loc::device()->destroy(render.refraction.pipeline.skybox);
-        hw::loc::device()->destroy(render.refraction.pipeline.lighting);
-        hw::loc::device()->destroy(render.refraction.pipeline.base);
-
-        hw::loc::device()->destroy(render.water.pipeline.skybox);
-        hw::loc::device()->destroy(render.water.pipeline.lighting);
-        hw::loc::device()->destroy(render.water.pipeline.base);
-
-        delete render.refraction.frameBuffer;
-        delete render.reflection.frameBuffer;
-
-        hw::loc::device()->destroy(render.reflection.pass);
-        hw::loc::device()->destroy(render.refraction.pass);
-        hw::loc::device()->destroy(render.water.pass);
+        for (auto& render: {water, refraction, reflection}) {
+            delete render;
+        }
 
         imgui->cleanup();
         delete hw::loc::swapChain();
@@ -358,36 +293,26 @@ private:
 
         hw::loc::provide(new hw::SwapChain(window));
 
-        render::pass(render.refraction.pass);
-        render::pass(render.reflection.pass);
-        render::pass(render.water.pass);
+        water = new Render("water");
+        refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        reflection = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        render::defaultFBO(render.water.pass);
-        render.refraction.frameBuffer = new render::FBO(&render.refraction.pass);
-        render.reflection.frameBuffer = new render::FBO(&render.reflection.pass);
+        water->setToDefaultFBO();
+        reflection->initFBO();
+        refraction->initFBO();
 
-        render::pipeline(render.water.pipeline.base, render.water.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.water.pipeline.lighting, render.water.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.water.pipeline.skybox, render.water.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+        for (auto& render: {water, refraction, reflection}) {
+            render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
+            render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+            render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+        }
 
-        render::pipeline(render.refraction.pipeline.base, render.refraction.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.refraction.pipeline.lighting, render.refraction.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.refraction.pipeline.skybox, render.refraction.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-
-        render::pipeline(render.reflection.pipeline.base, render.reflection.pass, pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-        render::pipeline(render.reflection.pipeline.lighting, render.reflection.pass, pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-        render::pipeline(render.reflection.pipeline.skybox, render.reflection.pass, pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-
-        createUniformBuffers();
         createDescriptorPool();
         allocateDescriptorSets();
+        createUniformBuffers();
         bindUnisToDescriptorSets();
 
         imgui->adjust();
-
-        hw::loc::cmd()->createCommandBuffers(render.water.commandBuffers, hw::loc::swapChain()->size());
-        hw::loc::cmd()->createCommandBuffers(render.refraction.commandBuffers, hw::loc::swapChain()->size());
-        hw::loc::cmd()->createCommandBuffers(render.reflection.commandBuffers, hw::loc::swapChain()->size());
 
         recordWaterCommandBuffers();
         recordRefractionCommandBuffers();
@@ -518,11 +443,11 @@ private:
                 bufferInfo.buffer = mesh.uniform.buffers[i];
 
                 if (mesh.tag == "Quad1") {
-                    imageInfo.imageView = render.refraction.frameBuffer->colorView(i);
-                    imageInfo.sampler = render.refraction.frameBuffer->colorSampler(i);
+                    imageInfo.imageView = refraction->colorView(i);
+                    imageInfo.sampler = refraction->colorSampler(i);
                 } else if (mesh.tag == "Quad2") {
-                    imageInfo.imageView = render.reflection.frameBuffer->colorView(i);
-                    imageInfo.sampler = render.reflection.frameBuffer->colorSampler(i);
+                    imageInfo.imageView = reflection->colorView(i);
+                    imageInfo.sampler = reflection->colorSampler(i);
                 } else {
                     imageInfo.imageView = mesh.texture->view();
                     imageInfo.sampler = mesh.texture->sampler();
@@ -539,13 +464,13 @@ private:
             VkCommandBufferBeginInfo beginInfo = {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-            if (vkBeginCommandBuffer(render.water.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+            if (vkBeginCommandBuffer(water->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
                 throw std::runtime_error("failed to begin recording command buffer!");
             }
 
             VkRenderPassBeginInfo renderPassInfo = {};
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = render.water.pass;
+            renderPassInfo.renderPass = water->renderPass();
             renderPassInfo.framebuffer = hw::loc::swapChain()->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
             renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
@@ -557,33 +482,33 @@ private:
             renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
             renderPassInfo.pClearValues = clearValues.data();
 
-            vkCmdBeginRenderPass(render.water.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(water->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             VkDeviceSize offsets[] = { 0 };
 
             PushConstants pushConstants;
 
             for (auto& mesh : meshes) {
-                vkCmdPushConstants(render.water.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+                vkCmdPushConstants(water->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                vkCmdBindDescriptorSets(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                     pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(render.water.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(render.water.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
                 if (mesh.tag == "Chalet" || mesh.tag == "Quad1" || mesh.tag == "Quad2")
-                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.base);
+                    vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(0));
                 else if (mesh.tag == "Skybox")
-                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.skybox);
+                    vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(1));
                 else
-                    vkCmdBindPipeline(render.water.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.water.pipeline.lighting);
+                    vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(2));
 
-                vkCmdDrawIndexed(render.water.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(water->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(render.water.commandBuffers[i]);
+            vkCmdEndRenderPass(water->commandBuffer(i));
 
-            if (vkEndCommandBuffer(render.water.commandBuffers[i]) != VK_SUCCESS) {
+            if (vkEndCommandBuffer(water->commandBuffer(i)) != VK_SUCCESS) {
                 throw std::runtime_error("failed to record command buffer!");
             }
         }
@@ -595,14 +520,14 @@ private:
             VkCommandBufferBeginInfo beginInfo = {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-            if (vkBeginCommandBuffer(render.refraction.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+            if (vkBeginCommandBuffer(refraction->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
                 throw std::runtime_error("failed to begin recording command buffer!");
             }
 
             VkRenderPassBeginInfo renderPassInfo = {};
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = render.refraction.pass;
-            renderPassInfo.framebuffer = render.refraction.frameBuffer->get(i);
+            renderPassInfo.renderPass = refraction->renderPass();
+            renderPassInfo.framebuffer = refraction->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
             renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
 
@@ -613,7 +538,7 @@ private:
             renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
             renderPassInfo.pClearValues = clearValues.data();
 
-            vkCmdBeginRenderPass(render.refraction.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(refraction->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             VkDeviceSize offsets[] = { 0 };
 
@@ -627,26 +552,26 @@ private:
                 if (mesh.tag == "Quad2")
                     continue;
 
-                vkCmdPushConstants(render.refraction.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+                vkCmdPushConstants(refraction->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                vkCmdBindDescriptorSets(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                vkCmdBindDescriptorSets(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                     pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(render.refraction.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(render.refraction.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
                 if (mesh.tag == "Chalet")
-                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.base);
+                    vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(0));
                 else if (mesh.tag == "Skybox")
-                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.skybox);
+                    vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(1));
                 else
-                    vkCmdBindPipeline(render.refraction.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.refraction.pipeline.lighting);
+                    vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(2));
 
-                vkCmdDrawIndexed(render.refraction.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(refraction->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(render.refraction.commandBuffers[i]);
+            vkCmdEndRenderPass(refraction->commandBuffer(i));
 
-            if (vkEndCommandBuffer(render.refraction.commandBuffers[i]) != VK_SUCCESS) {
+            if (vkEndCommandBuffer(refraction->commandBuffer(i)) != VK_SUCCESS) {
                 throw std::runtime_error("failed to record command buffer!");
             }
         }
@@ -658,14 +583,14 @@ private:
             VkCommandBufferBeginInfo beginInfo = {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-            if (vkBeginCommandBuffer(render.reflection.commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+            if (vkBeginCommandBuffer(reflection->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
                 throw std::runtime_error("failed to begin recording command buffer!");
             }
 
             VkRenderPassBeginInfo renderPassInfo = {};
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = render.reflection.pass;
-            renderPassInfo.framebuffer = render.reflection.frameBuffer->get(i);
+            renderPassInfo.renderPass = reflection->renderPass();
+            renderPassInfo.framebuffer = reflection->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
             renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
 
@@ -676,7 +601,7 @@ private:
             renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
             renderPassInfo.pClearValues = clearValues.data();
 
-            vkCmdBeginRenderPass(render.reflection.commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(reflection->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             VkDeviceSize offsets[] = { 0 };
 
@@ -690,26 +615,26 @@ private:
                 if (mesh.tag == "Quad2")
                     continue;
 
-                vkCmdPushConstants(render.reflection.commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+                vkCmdPushConstants(reflection->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                vkCmdBindDescriptorSets(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                vkCmdBindDescriptorSets(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
                     pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
-                vkCmdBindVertexBuffers(render.reflection.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(render.reflection.commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindVertexBuffers(reflection->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
                 if (mesh.tag == "Chalet")
-                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.base);
+                    vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(0));
                 else if (mesh.tag == "Skybox")
-                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.skybox);
+                    vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(1));
                 else
-                    vkCmdBindPipeline(render.reflection.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, render.reflection.pipeline.lighting);
+                    vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(2));
 
-                vkCmdDrawIndexed(render.reflection.commandBuffers[i], mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(reflection->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(render.reflection.commandBuffers[i]);
+            vkCmdEndRenderPass(reflection->commandBuffer(i));
 
-            if (vkEndCommandBuffer(render.reflection.commandBuffers[i]) != VK_SUCCESS) {
+            if (vkEndCommandBuffer(reflection->commandBuffer(i)) != VK_SUCCESS) {
                 throw std::runtime_error("failed to record command buffer!");
             }
         }
@@ -805,9 +730,9 @@ private:
 
         // Submit
         std::array<VkCommandBuffer, 4> submitCommandBuffers = {
-            render.refraction.commandBuffers[imageIndex],
-            render.reflection.commandBuffers[imageIndex],
-            render.water.commandBuffers[imageIndex],
+            refraction->commandBuffer(imageIndex),
+            reflection->commandBuffer(imageIndex),
+            water->commandBuffer(imageIndex),
             imgui->getCommandBuffer(imageIndex)
         };
 
