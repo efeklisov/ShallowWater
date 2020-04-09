@@ -41,8 +41,6 @@ struct Mesh {
 
     std::unique_ptr<Image> texture;
 
-    VkPipeline* pipeline;
-
     glm::vec3 transform;
     glm::vec3 rotation;
     glm::vec3 scale;
@@ -54,7 +52,8 @@ struct Mesh {
 
     struct DescriptorData {
         std::vector<VkDescriptorSet> sets;
-        VkDescriptorSetLayout* layout;
+        std::vector<VkDescriptorSet> imgs;
+        std::vector<VkDescriptorSet> im2s;
     } descriptor;
 
     struct UniformData {

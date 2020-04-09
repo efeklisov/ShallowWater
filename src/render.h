@@ -277,13 +277,13 @@ class Render {
             hw::loc::device()->destroy(pass);
         }
 
+        std::string tag;
+
     private:
         struct StructAvailableResourses {
             bool havedefaultFBO = false;
             bool haveFBO = false;
         } boolmap;
-
-        std::string_view tag;
 
         VkRenderPass pass;
         std::vector<VkFramebuffer> frameBuffers;

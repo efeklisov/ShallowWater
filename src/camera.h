@@ -13,7 +13,10 @@
 
 class Camera {
     public:
-        Camera(GLFWwindow *_window, float _width, float _height) : window(_window), lastX(_width / 2), lastY(_height / 2) { }
+        Camera(GLFWwindow *_window, float _width, float _height) : window(_window), lastX(_width / 2), lastY(_height / 2) { 
+            pitch = - glm::pi<float>();
+            update(0);
+        }
 
         ~Camera() { }
 
@@ -23,13 +26,20 @@ class Camera {
             glfwGetFramebufferSize(window, &_width, &_height);
 
             glm::quat quat = glm::quat(glm::vec3(pitch, yaw, roll));
+            glm::quat quatI = glm::quat(glm::vec3(-pitch, yaw, -roll));
             pitch = yaw = roll = 0;
 
             camera = quat * camera;
             camera = glm::normalize(camera);
             glm::mat4 rotate = glm::mat4_cast(camera);
+            
+            cameraI = quatI * cameraI;
+            cameraI = glm::normalize(cameraI);
+            glm::mat4 rotateI = glm::mat4_cast(cameraI);
 
             view = rotate * glm::translate(glm::mat4(1.0f), -cameraPos);
+            viewI = rotateI * glm::translate(glm::mat4(1.0f), -(cameraPos - distance(cameraPos)));
+
             proj = glm::perspective(glm::radians(fov), (float) _width / (float) _height, 0.1f, 100.0f);
         }
 
@@ -62,6 +72,10 @@ class Camera {
             }
         }
 
+        glm::vec3 distance(glm::vec3& _cameraPos) {
+            return glm::vec3(0.0f, glm::abs(2 * (_cameraPos.y - 1.0f)), 0.0f);
+        }
+
         void processMouse(double xpos, double ypos) {
             if(firstMouse) {
                 lastX = xpos;
@@ -83,6 +97,7 @@ class Camera {
         }
 
         glm::mat4 view;
+        glm::mat4 viewI;
         glm::mat4 proj;
         glm::vec3 cameraPos = glm::vec3(0.0f, 4.f, -7.0f);
 
@@ -95,8 +110,9 @@ class Camera {
         double lastX, lastY;
 
         float yaw = 0.0f;
-        float pitch = glm::pi<float>() / 2;
+        float pitch = 0.0f;
         float roll = 0.0f;
 
         glm::quat camera = glm::quat(glm::vec3(pitch, yaw, roll));
+        glm::quat cameraI = glm::quat(glm::vec3(pitch, yaw, roll));
 };

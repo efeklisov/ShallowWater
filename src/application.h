@@ -25,7 +25,6 @@
 
 #include "camera.h"
 #include "command.h"
-#include "create.h"
 #include "cubemap.h"
 #include "device.h"
 #include "imguiimpl.h"
@@ -34,7 +33,6 @@
 #include "mesh.h"
 #include "read.h"
 #include "render.h"
-#include "shader.h"
 #include "surface.h"
 #include "swapchain.h"
 #include "texture.h"
@@ -55,6 +53,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+    alignas(16) glm::mat4 invertView;
+    alignas(16) glm::mat4 invertModel;
     alignas(16) glm::vec3 cameraPos;
 };
 
@@ -62,6 +62,7 @@ struct PushConstants {
     alignas(4) glm::vec4 clipPlane = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
     alignas(4) glm::vec3 lightSource = glm::vec3(0.0f, 6.0f, -3.0f);
     alignas(4) glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
+    alignas(4) glm::vec3 invert = glm::vec3(0.0f);
 };
 
 class Application {
@@ -84,7 +85,9 @@ private:
     Render* refraction;
     Render* reflection;
 
-    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorSetLayout uboLayout;
+    VkDescriptorSetLayout imgLayout;
+    VkDescriptorSetLayout im2Layout;
 
     size_t currentFrame = 0;
     float currentTime = 0.0f;
@@ -97,6 +100,7 @@ private:
     Camera* camera;
 
     VkPipelineLayout pipelineLayout;
+    VkPipelineLayout pipelineQuad;
 
     std::vector<Mesh> meshes;
 
@@ -179,8 +183,7 @@ private:
         /**/ meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
             glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
         /**/ meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
-        /**/meshes.push_back(Mesh("Quad1", glm::vec2(6.0f, 4.0f), glm::vec3(4.0f, 6.0f, 0.0f)));
-        /**/meshes.push_back(Mesh("Quad2", glm::vec2(6.0f, 4.0f), glm::vec3(-4.0f, 6.0f, 0.0f)));
+        /**/ meshes.push_back(Mesh("Quad", glm::vec2(9.0f, 8.5f), glm::vec3(0.0f, 1.0f, -0.5f), glm::vec3(glm::pi<float>() / 2, 0.0f, 0.0f)));
 
         /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
         /**/ hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
@@ -199,6 +202,10 @@ private:
             render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
             render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
             render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+
+            if (render->tag == "water") {
+                render->addPipeline(pipelineQuad, "shaders/quad.vert.spv", "shaders/quad.frag.spv");
+            }
         }
 
         createDescriptorPool();
@@ -250,8 +257,12 @@ private:
     {
         cleanupSwapChain();
 
-        hw::loc::device()->destroy(descriptorSetLayout);
+        hw::loc::device()->destroy(uboLayout);
+        hw::loc::device()->destroy(imgLayout);
+        hw::loc::device()->destroy(im2Layout);
+
         hw::loc::device()->destroy(pipelineLayout);
+        hw::loc::device()->destroy(pipelineQuad);
 
         hw::loc::device()->destroy(indexBuffer);
         hw::loc::device()->free(indexBufferMemory);
@@ -305,6 +316,10 @@ private:
             render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
             render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
             render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+
+            if (render->tag == "water") {
+                render->addPipeline(pipelineQuad, "shaders/quad.vert.spv", "shaders/quad.frag.spv");
+            }
         }
 
         createDescriptorPool();
@@ -328,26 +343,25 @@ private:
         uboLayoutBinding.pImmutableSamplers = nullptr;
         uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboLayoutBinding;
+
+        hw::loc::device()->create(layoutInfo, uboLayout);
+
         VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
-        samplerLayoutBinding.binding = 1;
+        samplerLayoutBinding.binding = 0;
         samplerLayoutBinding.descriptorCount = 1;
         samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
         samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
-        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        layoutInfo.pBindings = bindings.data();
-
-        hw::loc::device()->create(layoutInfo, descriptorSetLayout);
-
-        for (auto& mesh : meshes)
-            mesh.descriptor.layout = &descriptorSetLayout;
+        layoutInfo.pBindings = &samplerLayoutBinding;
+        hw::loc::device()->create(layoutInfo, imgLayout);
 
         std::vector<VkDescriptorSetLayout> layouts = {
-            descriptorSetLayout
+            uboLayout, imgLayout
         };
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
@@ -361,6 +375,25 @@ private:
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRanges;
 
         hw::loc::device()->create(pipelineLayoutInfo, pipelineLayout);
+
+        VkDescriptorSetLayoutBinding im2LayoutBinding = {};
+        im2LayoutBinding.binding = 0;
+        im2LayoutBinding.descriptorCount = 1;
+        im2LayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        im2LayoutBinding.pImmutableSamplers = nullptr;
+        im2LayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        layoutInfo.pBindings = &im2LayoutBinding;
+        hw::loc::device()->create(layoutInfo, im2Layout);
+
+        layouts.push_back(im2Layout);
+        pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
+        pipelineLayoutInfo.pSetLayouts = layouts.data();
+
+        pipelineLayoutInfo.pushConstantRangeCount = 0;
+        pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+        hw::loc::device()->create(pipelineLayoutInfo, pipelineQuad);
     }
 
     void createDescriptorPool()
@@ -375,7 +408,7 @@ private:
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size());
+        poolInfo.maxSets = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
 
         hw::loc::device()->create(poolInfo, descriptorPool);
     }
@@ -383,16 +416,30 @@ private:
     void allocateDescriptorSets()
     {
         for (auto& mesh : meshes) {
-            std::vector<VkDescriptorSetLayout> layouts(hw::loc::swapChain()->size(), *mesh.descriptor.layout);
+            std::vector<VkDescriptorSetLayout> ubolayouts(hw::loc::swapChain()->size(), uboLayout);
+            std::vector<VkDescriptorSetLayout> imglayouts(hw::loc::swapChain()->size(), imgLayout);
 
             VkDescriptorSetAllocateInfo allocInfo = {};
             allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
             allocInfo.descriptorPool = descriptorPool;
             allocInfo.descriptorSetCount = static_cast<uint32_t>(hw::loc::swapChain()->size());
-            allocInfo.pSetLayouts = layouts.data();
+            allocInfo.pSetLayouts = ubolayouts.data();
 
             mesh.descriptor.sets.resize(hw::loc::swapChain()->size());
             hw::loc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
+
+            allocInfo.pSetLayouts = imglayouts.data();
+
+            mesh.descriptor.imgs.resize(hw::loc::swapChain()->size());
+            hw::loc::device()->allocate(allocInfo, mesh.descriptor.imgs.data());
+
+            if (mesh.tag == "Quad") {
+                std::vector<VkDescriptorSetLayout> im2layouts(hw::loc::swapChain()->size(), im2Layout);
+                allocInfo.pSetLayouts = im2layouts.data();
+
+                mesh.descriptor.im2s.resize(hw::loc::swapChain()->size());
+                hw::loc::device()->allocate(allocInfo, mesh.descriptor.im2s.data());
+            }
         }
     }
 
@@ -420,7 +467,10 @@ private:
             VkDescriptorImageInfo imageInfo = {};
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+            VkDescriptorImageInfo imageInfo2 = {};
+            imageInfo2.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            std::array<VkWriteDescriptorSet, 3> descriptorWrites = {};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstBinding = 0;
@@ -430,30 +480,37 @@ private:
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstBinding = 0;
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[1].descriptorCount = 1;
             descriptorWrites[1].pImageInfo = &imageInfo;
 
+            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstBinding = 0;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pImageInfo = &imageInfo2;
+
             for (auto& mesh : meshes) {
                 descriptorWrites[0].dstSet = mesh.descriptor.sets[i];
-                descriptorWrites[1].dstSet = mesh.descriptor.sets[i];
+                descriptorWrites[1].dstSet = mesh.descriptor.imgs[i];
 
                 bufferInfo.buffer = mesh.uniform.buffers[i];
 
-                if (mesh.tag == "Quad1") {
+                if (mesh.tag == "Quad") {
+                    descriptorWrites[2].dstSet = mesh.descriptor.im2s[i];
                     imageInfo.imageView = refraction->colorView(i);
                     imageInfo.sampler = refraction->colorSampler(i);
-                } else if (mesh.tag == "Quad2") {
-                    imageInfo.imageView = reflection->colorView(i);
-                    imageInfo.sampler = reflection->colorSampler(i);
+                    imageInfo2.imageView = reflection->colorView(i);
+                    imageInfo2.sampler = reflection->colorSampler(i);
+                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
                 } else {
                     imageInfo.imageView = mesh.texture->view();
                     imageInfo.sampler = mesh.texture->sampler();
+                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size() - 1), descriptorWrites.data());
                 }
-
-                hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
             }
         }
     }
@@ -491,15 +548,25 @@ private:
             for (auto& mesh : meshes) {
                 vkCmdPushConstants(water->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                if (mesh.tag != "Quad") {
+                    std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
+                    vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+                } else {
+                    std::array<VkDescriptorSet, 3> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i], mesh.descriptor.im2s[i]};
+                    vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineQuad, 0, sets.size(), sets.data(), 0, nullptr);
+                }
+
                 vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh.tag == "Chalet" || mesh.tag == "Quad1" || mesh.tag == "Quad2")
+                if (mesh.tag == "Chalet")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(0));
                 else if (mesh.tag == "Skybox")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(1));
+                else if (mesh.tag == "Quad")
+                    vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(3));
                 else
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(2));
 
@@ -543,19 +610,18 @@ private:
             VkDeviceSize offsets[] = { 0 };
 
             PushConstants pushConstants;
-            pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
+            pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
 
             for (auto& mesh : meshes) {
-                if (mesh.tag == "Quad1")
-                    continue;
-
-                if (mesh.tag == "Quad2")
+                if (mesh.tag == "Quad")
                     continue;
 
                 vkCmdPushConstants(refraction->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
+                std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
                 vkCmdBindDescriptorSets(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                    pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+
                 vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -606,19 +672,19 @@ private:
             VkDeviceSize offsets[] = { 0 };
 
             PushConstants pushConstants;
-            pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
+            pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
+            pushConstants.invert = glm::vec3(1.0f);
 
             for (auto& mesh : meshes) {
-                if (mesh.tag == "Quad1")
-                    continue;
-
-                if (mesh.tag == "Quad2")
+                if (mesh.tag == "Quad")
                     continue;
 
                 vkCmdPushConstants(reflection->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
+                std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
                 vkCmdBindDescriptorSets(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelineLayout, 0, 1, &mesh.descriptor.sets[i], 0, nullptr);
+                    pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+
                 vkCmdBindVertexBuffers(reflection->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -667,6 +733,7 @@ private:
 
         ubo.proj = camera->proj;
         ubo.view = camera->view;
+        ubo.invertView = camera->viewI;
         ubo.cameraPos = camera->cameraPos;
         for (auto& mesh : meshes) {
             glm::mat4 position;
@@ -685,6 +752,9 @@ private:
             }
 
             ubo.model = position * rotation * scale * glm::mat4(1.0f);
+            if (mesh.tag == "Skybox")
+                ubo.invertModel = glm::translate(glm::mat4(1.0f), camera->cameraPos - camera->distance(camera->cameraPos)) * rotation * scale * glm::mat4(1.0f);
+            else ubo.invertModel = ubo.model;
 
             void* data;
             hw::loc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
@@ -699,7 +769,7 @@ private:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::Text("Clip Distance Change");
+        /* ImGui::Text("Clip Distance Change"); */
         /* ImGui::SliderFloat("Height", &clipPlane.w, -10.0f, 10.0f); */
         ImGui::Render();
 
