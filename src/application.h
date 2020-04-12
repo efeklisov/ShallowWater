@@ -10,6 +10,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define PI glm::pi<float>()
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -30,13 +32,13 @@
 #include "imguiimpl.h"
 #include "instance.h"
 #include "locator.h"
-#include "mesh.h"
 #include "read.h"
 #include "render.h"
 #include "surface.h"
 #include "swapchain.h"
 #include "texture.h"
 #include "vertex.h"
+#include "descriptor.h"
 
 const int WIDTH = 1280;
 const int HEIGHT = 768;
@@ -85,10 +87,6 @@ private:
     Render* refraction;
     Render* reflection;
 
-    VkDescriptorSetLayout uboLayout;
-    VkDescriptorSetLayout imgLayout;
-    VkDescriptorSetLayout im2Layout;
-
     size_t currentFrame = 0;
     float currentTime = 0.0f;
     float deltaTime = 0.0f;
@@ -98,11 +96,7 @@ private:
     float lastTime = 0.0f;
 
     Camera* camera;
-
-    VkPipelineLayout pipelineLayout;
-    VkPipelineLayout pipelineQuad;
-
-    std::vector<Mesh> meshes;
+    Descriptor* desc;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -111,8 +105,6 @@ private:
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
-
-    VkDescriptorPool descriptorPool;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
@@ -179,16 +171,21 @@ private:
         hw::loc::provide(vertices);
         hw::loc::provide(indices);
 
-        /**/ meshes.push_back(Mesh("Skybox", "models/cube.obj", std::make_unique<CubeMap>("textures/storforsen")));
-        /**/ meshes.push_back(Mesh("Chalet", "models/chalet.obj", std::make_unique<Texture>("textures/chalet.jpg"),
-            glm::vec3(4.3177f, 1.8368f, 4.7955f), glm::vec3(-glm::pi<float>() / 2, 0.0f, 0.0f)));
-        /**/ meshes.push_back(Mesh("Lake", "models/lake.obj", std::make_unique<Texture>("textures/lake.png")));
-        /**/ meshes.push_back(Mesh("Quad", glm::vec2(9.0f, 8.5f), glm::vec3(0.0f, 1.0f, -0.5f), glm::vec3(glm::pi<float>() / 2, 0.0f, 0.0f)));
+        desc = new Descriptor();
+        desc->addLayout({{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
+        desc->addLayout({{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
+
+        desc->addPipeLayout({0}, {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants)}});
+        desc->addPipeLayout({0, 1});
+
+        desc->addMesh("Skybox", {0}, "models/cube.obj", new CubeMap("textures/storforsen"));
+        desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
+        desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
+        desc->addMesh("Quad", {0, 1}, {10.0f, 8.5f}, {0.0f, 1.0f, -0.5f}, {PI / 2, 0.0f, 0.0f});
+        desc->allocate();
 
         /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
         /**/ hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
-
-        /**/ createLayouts();
 
         water = new Render("water");
         refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -198,18 +195,17 @@ private:
         reflection->initFBO();
         refraction->initFBO();
 
+        #pragma omp parallel for
         for (auto& render: {water, refraction, reflection}) {
-            render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-            render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-            render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+            render->addPipeline(desc->pipeLayout(0), "shaders/base.vert.spv", "shaders/base.frag.spv");
+            render->addPipeline(desc->pipeLayout(0), "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+            render->addPipeline(desc->pipeLayout(0), "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
 
             if (render->tag == "water") {
-                render->addPipeline(pipelineQuad, "shaders/quad.vert.spv", "shaders/quad.frag.spv");
+                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.frag.spv");
             }
         }
 
-        createDescriptorPool();
-        allocateDescriptorSets();
         createUniformBuffers();
         bindUnisToDescriptorSets();
 
@@ -247,22 +243,14 @@ private:
         imgui->cleanup();
         delete hw::loc::swapChain();
 
-        for (auto& mesh : meshes)
-            mesh.free();
-
-        hw::loc::device()->destroy(descriptorPool);
+        desc->freePool();
     }
 
     void cleanup()
     {
         cleanupSwapChain();
 
-        hw::loc::device()->destroy(uboLayout);
-        hw::loc::device()->destroy(imgLayout);
-        hw::loc::device()->destroy(im2Layout);
-
-        hw::loc::device()->destroy(pipelineLayout);
-        hw::loc::device()->destroy(pipelineQuad);
+        delete desc;
 
         hw::loc::device()->destroy(indexBuffer);
         hw::loc::device()->free(indexBufferMemory);
@@ -276,7 +264,6 @@ private:
             hw::loc::device()->destroy(inFlightFences[i]);
         }
 
-        meshes.clear();
         delete imgui;
         delete camera;
         delete hw::loc::cmd();
@@ -312,18 +299,18 @@ private:
         reflection->initFBO();
         refraction->initFBO();
 
+        #pragma omp parallel for
         for (auto& render: {water, refraction, reflection}) {
-            render->addPipeline(pipelineLayout, "shaders/base.vert.spv", "shaders/base.frag.spv");
-            render->addPipeline(pipelineLayout, "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-            render->addPipeline(pipelineLayout, "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
+            render->addPipeline(desc->pipeLayout(0), "shaders/base.vert.spv", "shaders/base.frag.spv");
+            render->addPipeline(desc->pipeLayout(0), "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
+            render->addPipeline(desc->pipeLayout(0), "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
 
             if (render->tag == "water") {
-                render->addPipeline(pipelineQuad, "shaders/quad.vert.spv", "shaders/quad.frag.spv");
+                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.frag.spv");
             }
         }
+        desc->allocate();
 
-        createDescriptorPool();
-        allocateDescriptorSets();
         createUniformBuffers();
         bindUnisToDescriptorSets();
 
@@ -334,125 +321,15 @@ private:
         recordReflectionCommandBuffers();
     }
 
-    void createLayouts()
-    {
-        VkDescriptorSetLayoutBinding uboLayoutBinding = {};
-        uboLayoutBinding.binding = 0;
-        uboLayoutBinding.descriptorCount = 1;
-        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboLayoutBinding.pImmutableSamplers = nullptr;
-        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &uboLayoutBinding;
-
-        hw::loc::device()->create(layoutInfo, uboLayout);
-
-        VkDescriptorSetLayoutBinding samplerLayoutBinding = {};
-        samplerLayoutBinding.binding = 0;
-        samplerLayoutBinding.descriptorCount = 1;
-        samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerLayoutBinding.pImmutableSamplers = nullptr;
-        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        layoutInfo.pBindings = &samplerLayoutBinding;
-        hw::loc::device()->create(layoutInfo, imgLayout);
-
-        std::vector<VkDescriptorSetLayout> layouts = {
-            uboLayout, imgLayout
-        };
-
-        VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
-        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
-        pipelineLayoutInfo.pSetLayouts = layouts.data();
-
-        VkPushConstantRange pushConstantRanges = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants) };
-
-        pipelineLayoutInfo.pushConstantRangeCount = 1;
-        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRanges;
-
-        hw::loc::device()->create(pipelineLayoutInfo, pipelineLayout);
-
-        VkDescriptorSetLayoutBinding im2LayoutBinding = {};
-        im2LayoutBinding.binding = 0;
-        im2LayoutBinding.descriptorCount = 1;
-        im2LayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        im2LayoutBinding.pImmutableSamplers = nullptr;
-        im2LayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        layoutInfo.pBindings = &im2LayoutBinding;
-        hw::loc::device()->create(layoutInfo, im2Layout);
-
-        layouts.push_back(im2Layout);
-        pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
-        pipelineLayoutInfo.pSetLayouts = layouts.data();
-
-        pipelineLayoutInfo.pushConstantRangeCount = 0;
-        pipelineLayoutInfo.pPushConstantRanges = nullptr;
-
-        hw::loc::device()->create(pipelineLayoutInfo, pipelineQuad);
-    }
-
-    void createDescriptorPool()
-    {
-        std::array<VkDescriptorPoolSize, 2> poolSizes = {};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
-
-        VkDescriptorPoolCreateInfo poolInfo = {};
-        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-        poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(hw::loc::swapChain()->size() * meshes.size() * 3);
-
-        hw::loc::device()->create(poolInfo, descriptorPool);
-    }
-
-    void allocateDescriptorSets()
-    {
-        for (auto& mesh : meshes) {
-            std::vector<VkDescriptorSetLayout> ubolayouts(hw::loc::swapChain()->size(), uboLayout);
-            std::vector<VkDescriptorSetLayout> imglayouts(hw::loc::swapChain()->size(), imgLayout);
-
-            VkDescriptorSetAllocateInfo allocInfo = {};
-            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool = descriptorPool;
-            allocInfo.descriptorSetCount = static_cast<uint32_t>(hw::loc::swapChain()->size());
-            allocInfo.pSetLayouts = ubolayouts.data();
-
-            mesh.descriptor.sets.resize(hw::loc::swapChain()->size());
-            hw::loc::device()->allocate(allocInfo, mesh.descriptor.sets.data());
-
-            allocInfo.pSetLayouts = imglayouts.data();
-
-            mesh.descriptor.imgs.resize(hw::loc::swapChain()->size());
-            hw::loc::device()->allocate(allocInfo, mesh.descriptor.imgs.data());
-
-            if (mesh.tag == "Quad") {
-                std::vector<VkDescriptorSetLayout> im2layouts(hw::loc::swapChain()->size(), im2Layout);
-                allocInfo.pSetLayouts = im2layouts.data();
-
-                mesh.descriptor.im2s.resize(hw::loc::swapChain()->size());
-                hw::loc::device()->allocate(allocInfo, mesh.descriptor.im2s.data());
-            }
-        }
-    }
-
     void createUniformBuffers()
     {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        for (auto& mesh : meshes) {
-            mesh.uniform.buffers.resize(hw::loc::swapChain()->size());
-            mesh.uniform.memory.resize(hw::loc::swapChain()->size());
-
+        #pragma omp parallel for
+        for (auto& mesh : desc->meshes) {
             for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mesh.uniform.buffers[i], mesh.uniform.memory[i]);
+                create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, desc->getUniBuffer(mesh, i, 0), desc->getUniMemory(mesh, i, 0));
             }
         }
     }
@@ -480,7 +357,7 @@ private:
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstBinding = 0;
+            descriptorWrites[1].dstBinding = 1;
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[1].descriptorCount = 1;
@@ -493,22 +370,24 @@ private:
             descriptorWrites[2].descriptorCount = 1;
             descriptorWrites[2].pImageInfo = &imageInfo2;
 
-            for (auto& mesh : meshes) {
-                descriptorWrites[0].dstSet = mesh.descriptor.sets[i];
-                descriptorWrites[1].dstSet = mesh.descriptor.imgs[i];
+            #pragma omp parallel for
+            for (auto& mesh : desc->meshes) {
+                descriptorWrites[0].dstSet = desc->getDescriptor(mesh, i, 0);
+                descriptorWrites[1].dstSet = desc->getDescriptor(mesh, i, 0);
 
-                bufferInfo.buffer = mesh.uniform.buffers[i];
+                bufferInfo.buffer = desc->getUniBuffer(mesh, i, 0);
 
-                if (mesh.tag == "Quad") {
-                    descriptorWrites[2].dstSet = mesh.descriptor.im2s[i];
+                if (mesh->tag == "Quad") {
+                    descriptorWrites[2].dstSet = desc->getDescriptor(mesh, i, 1);
+
                     imageInfo.imageView = refraction->colorView(i);
                     imageInfo.sampler = refraction->colorSampler(i);
                     imageInfo2.imageView = reflection->colorView(i);
                     imageInfo2.sampler = reflection->colorSampler(i);
                     hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
                 } else {
-                    imageInfo.imageView = mesh.texture->view();
-                    imageInfo.sampler = mesh.texture->sampler();
+                    imageInfo.imageView = mesh->texture->view();
+                    imageInfo.sampler = mesh->texture->sampler();
                     hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size() - 1), descriptorWrites.data());
                 }
             }
@@ -545,32 +424,33 @@ private:
 
             PushConstants pushConstants;
 
-            for (auto& mesh : meshes) {
-                vkCmdPushConstants(water->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+            #pragma omp parallel for
+            for (auto& mesh : desc->meshes) {
+                vkCmdPushConstants(water->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                if (mesh.tag != "Quad") {
-                    std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
+                if (mesh->tag != "Quad") {
+                    std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
                     vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+                        desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
                 } else {
-                    std::array<VkDescriptorSet, 3> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i], mesh.descriptor.im2s[i]};
+                    std::array<VkDescriptorSet, 2> sets = {desc->getDescriptor(mesh, i, 0), desc->getDescriptor(mesh, i, 1)};
                     vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineQuad, 0, sets.size(), sets.data(), 0, nullptr);
+                        desc->pipeLayout(1), 0, sets.size(), sets.data(), 0, nullptr);
                 }
 
                 vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh.tag == "Chalet")
+                if (mesh->tag == "Chalet")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(0));
-                else if (mesh.tag == "Skybox")
+                else if (mesh->tag == "Skybox")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(1));
-                else if (mesh.tag == "Quad")
+                else if (mesh->tag == "Quad")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(3));
                 else
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(2));
 
-                vkCmdDrawIndexed(water->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(water->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
             vkCmdEndRenderPass(water->commandBuffer(i));
@@ -612,27 +492,28 @@ private:
             PushConstants pushConstants;
             pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
 
-            for (auto& mesh : meshes) {
-                if (mesh.tag == "Quad")
+            #pragma omp parallel for
+            for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Quad")
                     continue;
 
-                vkCmdPushConstants(refraction->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+                vkCmdPushConstants(refraction->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
+                std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
                 vkCmdBindDescriptorSets(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+                    desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
 
                 vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh.tag == "Chalet")
+                if (mesh->tag == "Chalet")
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(0));
-                else if (mesh.tag == "Skybox")
+                else if (mesh->tag == "Skybox")
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(1));
                 else
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(2));
 
-                vkCmdDrawIndexed(refraction->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(refraction->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
             vkCmdEndRenderPass(refraction->commandBuffer(i));
@@ -675,27 +556,28 @@ private:
             pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
             pushConstants.invert = glm::vec3(1.0f);
 
-            for (auto& mesh : meshes) {
-                if (mesh.tag == "Quad")
+            #pragma omp parallel for
+            for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Quad")
                     continue;
 
-                vkCmdPushConstants(reflection->commandBuffer(i), pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+                vkCmdPushConstants(reflection->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                std::array<VkDescriptorSet, 2> sets = {mesh.descriptor.sets[i], mesh.descriptor.imgs[i]};
+                std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
                 vkCmdBindDescriptorSets(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelineLayout, 0, sets.size(), sets.data(), 0, nullptr);
+                    desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
 
                 vkCmdBindVertexBuffers(reflection->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh.tag == "Chalet")
+                if (mesh->tag == "Chalet")
                     vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(0));
-                else if (mesh.tag == "Skybox")
+                else if (mesh->tag == "Skybox")
                     vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(1));
                 else
                     vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(2));
 
-                vkCmdDrawIndexed(reflection->commandBuffer(i), mesh.vertex.size, 1, 0, mesh.vertex.start, 0);
+                vkCmdDrawIndexed(reflection->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
             vkCmdEndRenderPass(reflection->commandBuffer(i));
@@ -720,6 +602,7 @@ private:
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+        #pragma omp parallel for
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             hw::loc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
             hw::loc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
@@ -735,31 +618,33 @@ private:
         ubo.view = camera->view;
         ubo.invertView = camera->viewI;
         ubo.cameraPos = camera->cameraPos;
-        for (auto& mesh : meshes) {
+
+        #pragma omp parallel for
+        for (auto& mesh : desc->meshes) {
             glm::mat4 position;
-            glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh.rotation)));
+            glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh->rotation)));
             glm::mat4 scale;
 
-            if (mesh.tag != "Skybox") {
-                position = glm::translate(glm::mat4(1.0f), mesh.transform);
+            if (mesh->tag != "Skybox") {
+                position = glm::translate(glm::mat4(1.0f), mesh->transform);
 
-                glm::vec3 _scale = mesh.scale;
+                glm::vec3 _scale = mesh->scale;
                 _scale.x *= -1;
                 scale = glm::scale(glm::mat4(1.0f), _scale);
             } else {
                 position = glm::translate(glm::mat4(1.0f), camera->cameraPos);
-                scale = glm::scale(glm::mat4(1.0f), mesh.scale);
+                scale = glm::scale(glm::mat4(1.0f), mesh->scale);
             }
 
             ubo.model = position * rotation * scale * glm::mat4(1.0f);
-            if (mesh.tag == "Skybox")
+            if (mesh->tag == "Skybox")
                 ubo.invertModel = glm::translate(glm::mat4(1.0f), camera->cameraPos - camera->distance(camera->cameraPos)) * rotation * scale * glm::mat4(1.0f);
             else ubo.invertModel = ubo.model;
 
             void* data;
-            hw::loc::device()->map(mesh.uniform.memory[currentImage], sizeof(ubo), data);
+            hw::loc::device()->map(desc->getUniMemory(mesh, currentImage, 0), sizeof(ubo), data);
             memcpy(data, &ubo, sizeof(ubo));
-            hw::loc::device()->unmap(mesh.uniform.memory[currentImage]);
+            hw::loc::device()->unmap(desc->getUniMemory(mesh, currentImage, 0));
         }
     }
 

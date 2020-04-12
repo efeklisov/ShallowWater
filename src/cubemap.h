@@ -49,6 +49,7 @@ class CubeMap : public Image {
             VkDeviceSize imageSize = texWidth * texHeight * 4;
             VkDeviceSize cubeMapSize = texWidth * texHeight * 4 * 6;
 
+            #pragma omp parallel for
             for (int i = 0; i < 6; i++)
                 if (!pixels[i])
                     throw std::runtime_error("failed to load cubemap image!");
@@ -59,10 +60,13 @@ class CubeMap : public Image {
 
             void* data;
             hw::loc::device()->map(stagingBufferMemory, cubeMapSize, data);
+
+            #pragma omp parallel for
             for (int i = 0; i < 6; i++)
                 memcpy(static_cast<char *>(data) + (static_cast<size_t>(imageSize) * i), pixels[i], static_cast<size_t>(imageSize));
             hw::loc::device()->unmap(stagingBufferMemory);
 
+            #pragma omp parallel for
             for (int i = 0; i < 6; i++)
                 stbi_image_free(pixels[i]);
 

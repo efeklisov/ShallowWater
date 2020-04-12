@@ -1,10 +1,11 @@
 project (Hova's_Engine)
 cmake_minimum_required (VERSION 3.10)
 
-set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD 20)
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -ldl" )
 
+find_package (OpenMP REQUIRED)
 find_package (glfw3 3.3 REQUIRED)
 find_package (glm REQUIRED)
 
