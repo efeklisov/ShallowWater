@@ -12,6 +12,10 @@
 
 class Render {
     public:
+        VkExtent2D& extent() {
+            return fboExtent;
+        }
+
         VkImageView& colorView(uint32_t index)
         {
             if (boolmap.haveFBO)
@@ -173,9 +177,10 @@ class Render {
             hw::loc::device()->create(pipelineInfo, pipelines[pipelines.size() - 1]);
         }
 
-        void setToDefaultFBO()
+        void setToDefaultFBO(uint32_t width = hw::loc::swapChain()->width(), uint32_t height = hw::loc::swapChain()->height())
         {
             assert(!boolmap.haveFBO);
+            fboExtent = {width, height};
 
             for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 std::array<VkImageView, 2> attachments = {
@@ -188,8 +193,8 @@ class Render {
                 framebufferInfo.renderPass = pass;
                 framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
                 framebufferInfo.pAttachments = attachments.data();
-                framebufferInfo.width = hw::loc::swapChain()->width();
-                framebufferInfo.height = hw::loc::swapChain()->height();
+                framebufferInfo.width = width;
+                framebufferInfo.height = height;
                 framebufferInfo.layers = 1;
 
                 hw::loc::device()->create(framebufferInfo, hw::loc::swapChain()->frameBuffer(i));
@@ -201,6 +206,7 @@ class Render {
         void initFBO(uint32_t width = hw::loc::swapChain()->width(), uint32_t height = hw::loc::swapChain()->height()) 
         {
             assert(!boolmap.havedefaultFBO);
+            fboExtent = {width, height};
 
             frameBuffers.resize(hw::loc::swapChain()->size());
 
@@ -286,6 +292,8 @@ class Render {
         } boolmap;
 
         VkRenderPass pass;
+        VkExtent2D fboExtent;
+
         std::vector<VkFramebuffer> frameBuffers;
         std::vector<VkCommandBuffer> commandBuffers;
         std::vector<VkPipeline> pipelines;

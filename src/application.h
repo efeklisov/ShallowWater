@@ -40,8 +40,8 @@
 #include "vertex.h"
 #include "descriptor.h"
 
-const int WIDTH = 1280;
-const int HEIGHT = 768;
+const int WIDTH = 800;
+const int HEIGHT = 600;
 
 const int MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -172,8 +172,10 @@ private:
         hw::loc::provide(indices);
 
         desc = new Descriptor();
-        desc->addLayout({{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
-        desc->addLayout({{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
+        desc->addLayout({{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}, 
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
+        desc->addLayout({{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, 
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT}});
 
         desc->addPipeLayout({0}, {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants)}});
         desc->addPipeLayout({0, 1});
@@ -181,7 +183,7 @@ private:
         desc->addMesh("Skybox", {0}, "models/cube.obj", new CubeMap("textures/storforsen"));
         desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
         desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
-        desc->addMesh("Quad", {0, 1}, {10.0f, 8.5f}, {0.0f, 1.0f, -0.5f}, {PI / 2, 0.0f, 0.0f});
+        desc->addMesh("Quad", {0, 1}, "models/grid.obj", new Texture("textures/heightmap.jpg"), {0.0f, 1.0f, -0.5f});
         desc->allocate();
 
         /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
@@ -347,7 +349,10 @@ private:
             VkDescriptorImageInfo imageInfo2 = {};
             imageInfo2.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            std::array<VkWriteDescriptorSet, 3> descriptorWrites = {};
+            VkDescriptorImageInfo imageInfo3 = {};
+            imageInfo3.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            std::array<VkWriteDescriptorSet, 4> descriptorWrites = {};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstBinding = 0;
@@ -370,6 +375,13 @@ private:
             descriptorWrites[2].descriptorCount = 1;
             descriptorWrites[2].pImageInfo = &imageInfo2;
 
+            descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[3].dstBinding = 1;
+            descriptorWrites[3].dstArrayElement = 0;
+            descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[3].descriptorCount = 1;
+            descriptorWrites[3].pImageInfo = &imageInfo3;
+
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
                 descriptorWrites[0].dstSet = desc->getDescriptor(mesh, i, 0);
@@ -379,16 +391,22 @@ private:
 
                 if (mesh->tag == "Quad") {
                     descriptorWrites[2].dstSet = desc->getDescriptor(mesh, i, 1);
+                    descriptorWrites[3].dstSet = desc->getDescriptor(mesh, i, 1);
 
                     imageInfo.imageView = refraction->colorView(i);
                     imageInfo.sampler = refraction->colorSampler(i);
+
                     imageInfo2.imageView = reflection->colorView(i);
                     imageInfo2.sampler = reflection->colorSampler(i);
+
+                    imageInfo3.imageView = mesh->texture->view();
+                    imageInfo3.sampler = mesh->texture->sampler();
+
                     hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
                 } else {
                     imageInfo.imageView = mesh->texture->view();
                     imageInfo.sampler = mesh->texture->sampler();
-                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size() - 1), descriptorWrites.data());
+                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size() - 2), descriptorWrites.data());
                 }
             }
         }
@@ -409,7 +427,7 @@ private:
             renderPassInfo.renderPass = water->renderPass();
             renderPassInfo.framebuffer = hw::loc::swapChain()->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
+            renderPassInfo.renderArea.extent = water->extent();
 
             std::array<VkClearValue, 2> clearValues = {};
             clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -476,7 +494,7 @@ private:
             renderPassInfo.renderPass = refraction->renderPass();
             renderPassInfo.framebuffer = refraction->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
+            renderPassInfo.renderArea.extent = refraction->extent();
 
             std::array<VkClearValue, 2> clearValues = {};
             clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -539,7 +557,7 @@ private:
             renderPassInfo.renderPass = reflection->renderPass();
             renderPassInfo.framebuffer = reflection->frameBuffer(i);
             renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = hw::loc::swapChain()->extent();
+            renderPassInfo.renderArea.extent = reflection->extent();
 
             std::array<VkClearValue, 2> clearValues = {};
             clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };

@@ -3,9 +3,13 @@ cmake_minimum_required (VERSION 3.10)
 
 set (CMAKE_CXX_STANDARD 20)
 
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -ldl" )
+if (UNIX AND NOT APPLE)
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -ldl" )
+    find_package (OpenMP REQUIRED)
+else ()
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g" )
+endif ()
 
-find_package (OpenMP REQUIRED)
 find_package (glfw3 3.3 REQUIRED)
 find_package (glm REQUIRED)
 
