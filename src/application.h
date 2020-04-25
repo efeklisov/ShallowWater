@@ -40,8 +40,8 @@
 #include "vertex.h"
 #include "descriptor.h"
 
-const int WIDTH = 800;
-const int HEIGHT = 600;
+const int WIDTH = 1280;
+const int HEIGHT = 768;
 
 const int MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -57,7 +57,7 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
     alignas(16) glm::mat4 invertView;
     alignas(16) glm::mat4 invertModel;
-    alignas(16) glm::vec3 cameraPos;
+    alignas(16) glm::vec4 cameraPos;
 };
 
 struct PushConstants {
@@ -186,8 +186,8 @@ private:
         desc->addMesh("Quad", {0, 1}, "models/grid.obj", new Texture("textures/heightmap.jpg"), {0.0f, 1.0f, -0.5f});
         desc->allocate();
 
-        /**/ hw::loc::cmd()->vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
-        /**/ hw::loc::cmd()->indexBuffer(indices, indexBuffer, indexBufferMemory);
+        create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
+        create::indexBuffer(indices, indexBuffer, indexBufferMemory);
 
         water = new Render("water");
         refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -204,7 +204,7 @@ private:
             render->addPipeline(desc->pipeLayout(0), "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
 
             if (render->tag == "water") {
-                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.frag.spv");
+                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.geom.spv", "shaders/quad.frag.spv", true, false);
             }
         }
 
@@ -415,28 +415,8 @@ private:
     void recordWaterCommandBuffers()
     {
         for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-            VkCommandBufferBeginInfo beginInfo = {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-            if (vkBeginCommandBuffer(water->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
-                throw std::runtime_error("failed to begin recording command buffer!");
-            }
-
-            VkRenderPassBeginInfo renderPassInfo = {};
-            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = water->renderPass();
-            renderPassInfo.framebuffer = hw::loc::swapChain()->frameBuffer(i);
-            renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = water->extent();
-
-            std::array<VkClearValue, 2> clearValues = {};
-            clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
-            clearValues[1].depthStencil = { 1.0f, 0 };
-
-            renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-            renderPassInfo.pClearValues = clearValues.data();
-
-            vkCmdBeginRenderPass(water->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            hw::loc::cmd()->startBuffer(water->commandBuffer(i));
+            water->startPass(i);
 
             VkDeviceSize offsets[] = { 0 };
 
@@ -446,15 +426,10 @@ private:
             for (auto& mesh : desc->meshes) {
                 vkCmdPushConstants(water->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                if (mesh->tag != "Quad") {
-                    std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
-                    vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
-                } else {
-                    std::array<VkDescriptorSet, 2> sets = {desc->getDescriptor(mesh, i, 0), desc->getDescriptor(mesh, i, 1)};
-                    vkCmdBindDescriptorSets(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        desc->pipeLayout(1), 0, sets.size(), sets.data(), 0, nullptr);
-                }
+                if (mesh->tag != "Quad")
+                    desc->bindDescriptors(water->commandBuffer(i), mesh, i, 0);
+                else
+                    desc->bindDescriptors(water->commandBuffer(i), mesh, i, 1);
 
                 vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -471,44 +446,21 @@ private:
                 vkCmdDrawIndexed(water->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(water->commandBuffer(i));
-
-            if (vkEndCommandBuffer(water->commandBuffer(i)) != VK_SUCCESS) {
-                throw std::runtime_error("failed to record command buffer!");
-            }
+            water->endPass(i);
+            hw::loc::cmd()->endBuffer(water->commandBuffer(i));
         }
     }
 
     void recordRefractionCommandBuffers()
     {
         for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-            VkCommandBufferBeginInfo beginInfo = {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-            if (vkBeginCommandBuffer(refraction->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
-                throw std::runtime_error("failed to begin recording command buffer!");
-            }
-
-            VkRenderPassBeginInfo renderPassInfo = {};
-            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = refraction->renderPass();
-            renderPassInfo.framebuffer = refraction->frameBuffer(i);
-            renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = refraction->extent();
-
-            std::array<VkClearValue, 2> clearValues = {};
-            clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
-            clearValues[1].depthStencil = { 1.0f, 0 };
-
-            renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-            renderPassInfo.pClearValues = clearValues.data();
-
-            vkCmdBeginRenderPass(refraction->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            hw::loc::cmd()->startBuffer(refraction->commandBuffer(i));
+            refraction->startPass(i);
 
             VkDeviceSize offsets[] = { 0 };
 
             PushConstants pushConstants;
-            pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
+            pushConstants.clipPlane = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f + 2.0f);
 
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
@@ -517,10 +469,7 @@ private:
 
                 vkCmdPushConstants(refraction->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
-                vkCmdBindDescriptorSets(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
-
+                desc->bindDescriptors(refraction->commandBuffer(i), mesh, i, 0);
                 vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -534,44 +483,21 @@ private:
                 vkCmdDrawIndexed(refraction->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(refraction->commandBuffer(i));
-
-            if (vkEndCommandBuffer(refraction->commandBuffer(i)) != VK_SUCCESS) {
-                throw std::runtime_error("failed to record command buffer!");
-            }
+            refraction->endPass(i);
+            hw::loc::cmd()->endBuffer(refraction->commandBuffer(i));
         }
     }
 
     void recordReflectionCommandBuffers()
     {
         for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-            VkCommandBufferBeginInfo beginInfo = {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-            if (vkBeginCommandBuffer(reflection->commandBuffer(i), &beginInfo) != VK_SUCCESS) {
-                throw std::runtime_error("failed to begin recording command buffer!");
-            }
-
-            VkRenderPassBeginInfo renderPassInfo = {};
-            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassInfo.renderPass = reflection->renderPass();
-            renderPassInfo.framebuffer = reflection->frameBuffer(i);
-            renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = reflection->extent();
-
-            std::array<VkClearValue, 2> clearValues = {};
-            clearValues[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
-            clearValues[1].depthStencil = { 1.0f, 0 };
-
-            renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-            renderPassInfo.pClearValues = clearValues.data();
-
-            vkCmdBeginRenderPass(reflection->commandBuffer(i), &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            hw::loc::cmd()->startBuffer(reflection->commandBuffer(i));
+            reflection->startPass(i);
 
             VkDeviceSize offsets[] = { 0 };
 
             PushConstants pushConstants;
-            pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f);
+            pushConstants.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, -1.0f + 0.1f);
             pushConstants.invert = glm::vec3(1.0f);
 
             #pragma omp parallel for
@@ -581,10 +507,7 @@ private:
 
                 vkCmdPushConstants(reflection->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
-                std::array<VkDescriptorSet, 1> sets = {desc->getDescriptor(mesh, i, 0)};
-                vkCmdBindDescriptorSets(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    desc->pipeLayout(0), 0, sets.size(), sets.data(), 0, nullptr);
-
+                desc->bindDescriptors(reflection->commandBuffer(i), mesh, i, 0);
                 vkCmdBindVertexBuffers(reflection->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -598,11 +521,8 @@ private:
                 vkCmdDrawIndexed(reflection->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
             }
 
-            vkCmdEndRenderPass(reflection->commandBuffer(i));
-
-            if (vkEndCommandBuffer(reflection->commandBuffer(i)) != VK_SUCCESS) {
-                throw std::runtime_error("failed to record command buffer!");
-            }
+            reflection->endPass(i);
+            hw::loc::cmd()->endBuffer(reflection->commandBuffer(i));
         }
     }
 
@@ -635,7 +555,7 @@ private:
         ubo.proj = camera->proj;
         ubo.view = camera->view;
         ubo.invertView = camera->viewI;
-        ubo.cameraPos = camera->cameraPos;
+        ubo.cameraPos = glm::vec4(camera->cameraPos, currentTime);
 
         #pragma omp parallel for
         for (auto& mesh : desc->meshes) {

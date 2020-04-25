@@ -17,7 +17,7 @@ layout(set = 0, binding = 0) uniform UniformBufferObject {
     mat4 proj;
     mat4 invertView;
     mat4 invertModel;
-    vec3 cameraPos;
+    vec4 cameraPos;
 } ubo;
 
 layout (location = 0) out vec3 outUVW;

@@ -7,7 +7,7 @@ layout(set = 0, binding = 0) uniform UniformBufferObject {
     mat4 proj;
     mat4 invertView;
     mat4 invertModel;
-    vec3 cameraPos;
+    vec4 cameraPos;
 } ubo;
 
 layout(push_constant) uniform PushConsts {
@@ -37,5 +37,5 @@ void main() {
     fragNormals = mat3(transpose(inverse(ubo.model))) * inNormals;
     fragTexCoord = inTexCoord;
     fragPos = worldPosition.xyz;
-    fragCameraPos = ubo.cameraPos;
+    fragCameraPos = ubo.cameraPos.xyz;
 }

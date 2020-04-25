@@ -1,3 +1,5 @@
+#pragma once
+
 #include <volk.h>
 #include <glm/glm.hpp>
 
@@ -214,6 +216,10 @@ class Descriptor {
             if (mesh->descriptor.size <= descriptor)
                 std::runtime_error("No more descriptors for mesh");
             return descriptorSets[frame][mesh->descriptor.start + descriptor];
+        }
+
+        void bindDescriptors(VkCommandBuffer& buffer, Mesh* mesh, uint32_t frame, uint32_t layout) {
+            vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout(layout), 0, mesh->descriptor.size, &descriptorSets[frame][mesh->descriptor.start], 0, nullptr);
         }
 
         VkBuffer& getUniBuffer(Mesh* mesh, uint32_t frame, uint32_t buffer) {
