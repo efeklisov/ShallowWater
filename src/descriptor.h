@@ -121,6 +121,30 @@ class Descriptor {
                 }
             }
 
+        void addMesh(std::string_view _tag, const std::vector<uint32_t> _sets,
+                glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
+                glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
+                glm::vec3 _scale=glm::vec3(1.0f, 1.0f, 1.0f))
+            {
+                meshes.push_back(new Mesh(_tag, descriptorLayouts.size(), _sets.size(), _transform, _rotation, _scale));
+
+                #pragma omp parallel for
+                for (auto& set: _sets) {
+                    for (auto& type: layoutTypes[set].types) {
+                        descriptorTypes[type]++;
+
+                        if (type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                            if (meshes[meshes.size() - 1]->uniform.start == -1) {
+                                meshes[meshes.size() - 1]->uniform.start = uniIndex;
+                                meshes[meshes.size() - 1]->uniform.size = 1;
+                            } else meshes[meshes.size() - 1]->uniform.size++; 
+
+                            uniIndex++;
+                        }
+                    } descriptorLayouts.push_back(layoutTypes[set].layout);
+                }
+            }
+
         void addMesh(std::string_view _tag, const std::vector<uint32_t> _sets, std::string_view model, Image* _texture,
                 glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
                 glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
@@ -199,6 +223,7 @@ class Descriptor {
         Descriptor() {
             descriptorTypes[VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER] = 0;
             descriptorTypes[VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER] = 0;
+            descriptorTypes[VK_DESCRIPTOR_TYPE_STORAGE_IMAGE] = 0;
         }
 
         ~Descriptor() {
@@ -218,8 +243,10 @@ class Descriptor {
             return descriptorSets[frame][mesh->descriptor.start + descriptor];
         }
 
-        void bindDescriptors(VkCommandBuffer& buffer, Mesh* mesh, uint32_t frame, uint32_t layout) {
-            vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout(layout), 0, mesh->descriptor.size, &descriptorSets[frame][mesh->descriptor.start], 0, nullptr);
+        void bindDescriptors(VkCommandBuffer& buffer, Mesh* mesh, uint32_t frame, uint32_t layout, bool compute=false) {
+            if (compute)
+                vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout(layout), 0, mesh->descriptor.size, &descriptorSets[frame][mesh->descriptor.start], 0, nullptr);
+            else vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout(layout), 0, mesh->descriptor.size, &descriptorSets[frame][mesh->descriptor.start], 0, nullptr);
         }
 
         VkBuffer& getUniBuffer(Mesh* mesh, uint32_t frame, uint32_t buffer) {

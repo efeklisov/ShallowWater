@@ -28,6 +28,16 @@ struct Mesh {
             simple = true;
         }
 
+    Mesh(std::string_view _tag, uint32_t start, uint32_t size,
+            glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3 _scale=glm::vec3(1.0f, 1.0f, 1.0f))
+        : tag(_tag.data()), transform(_transform), rotation(_rotation), scale(_scale) {
+
+            descriptor.start = start;
+            descriptor.size = size;
+        }
+
     Mesh(std::string_view _tag, uint32_t start, uint32_t size, std::string_view model, Image* _texture,
             glm::vec3 _transform=glm::vec3(0.0f, 0.0f, 0.0f),
             glm::vec3 _rotation=glm::vec3(0.0f, 0.0f, 0.0f),

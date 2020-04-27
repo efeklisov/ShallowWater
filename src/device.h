@@ -19,9 +19,10 @@ namespace hw {
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
         std::optional<uint32_t> presentFamily;
+        std::optional<uint32_t> computeFamily;
 
         bool isComplete() {
-            return graphicsFamily.has_value() && presentFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value() && computeFamily.has_value();
         }
     };
 
@@ -64,7 +65,7 @@ namespace hw {
                 std::cout << info.deviceName << std::endl;
 
                 std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-                std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+                std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value(), indices.computeFamily.value()};
 
                 float queuePriority = 1.0f;
                 for (uint32_t queueFamily : uniqueQueueFamilies) {
@@ -108,6 +109,7 @@ namespace hw {
 
                 vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
                 vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
+                vkGetDeviceQueue(device, indices.computeFamily.value(), 0, &computeQueue);
             }
 
             ~Device() {
@@ -192,6 +194,12 @@ namespace hw {
             void create(VkPipelineLayoutCreateInfo& pipelineLayoutInfo, VkPipelineLayout& pipelineLayout) {
                 if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create pipeline layout!");
+                }
+            }
+
+            void create(VkComputePipelineCreateInfo& pipelineInfo, VkPipeline& computePipeline) {
+                if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS) {
+                    throw std::runtime_error("failed to create graphics pipeline!");
                 }
             }
 
@@ -398,35 +406,7 @@ namespace hw {
             }
 
             QueueFamilyIndices findQueueFamilies() {
-                QueueFamilyIndices indices;
-
-                uint32_t queueFamilyCount = 0;
-                vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-
-                std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-                vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
-
-                int i = 0;
-                for (const auto& queueFamily : queueFamilies) {
-                    if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-                        indices.graphicsFamily = i;
-                    }
-
-                    VkBool32 presentSupport = false;
-                    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, hw::loc::surface()->get(), &presentSupport);
-
-                    if (presentSupport) {
-                        indices.presentFamily = i;
-                    }
-
-                    if (indices.isComplete()) {
-                        break;
-                    }
-
-                    i++;
-                }
-
-                return indices;
+                return findQueueFamilies(physicalDevice);
             }
 
             uint32_t find(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
@@ -466,6 +446,7 @@ namespace hw {
 
             VkQueue graphicsQueue;
             VkQueue presentQueue;
+            VkQueue computeQueue;
 
             bool isDeviceSuitable(VkPhysicalDevice _physicalDevice) {
                 QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);
@@ -513,6 +494,10 @@ namespace hw {
                 for (const auto& queueFamily : queueFamilies) {
                     if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                         indices.graphicsFamily = i;
+                    }
+
+                    if (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+                        indices.computeFamily = i;
                     }
 
                     VkBool32 presentSupport = false;

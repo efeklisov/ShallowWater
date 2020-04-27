@@ -25,7 +25,7 @@ void main() {
     vec4 worldPosition = ubo.model * vec4(position, 1.0);
     beforeDistortion = ubo.proj * ubo.view * worldPosition;
 
-    position.y += texture(heightmap, inTexCoord + ubo.cameraPos.w / 4).r;
+    position.y += texture(heightmap, inTexCoord /*+ ubo.cameraPos.w / 4*/).r;
     worldPosition = ubo.model * vec4(position, 1.0);
     gl_Position = ubo.proj * ubo.view * worldPosition;
 

@@ -8,6 +8,7 @@
 #include "device.h"
 #include "vertex.h"
 #include "command.h"
+#include "image.h"
 
 namespace create {
     void buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
@@ -144,6 +145,26 @@ namespace create {
         hw::loc::device()->allocate(allocInfo, imageMemory);
 
         hw::loc::device()->bind(image, imageMemory);
+    }
+
+    void staging(std::string_view filename, VkBuffer& stagingBuffer, VkDeviceMemory& stagingBufferMemory) {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load(filename.data(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+        create::buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        hw::loc::device()->map(stagingBufferMemory, imageSize, data);
+        /**/memcpy(data, pixels, static_cast<size_t>(imageSize));
+        hw::loc::device()->unmap(stagingBufferMemory);
+
+        stbi_image_free(pixels);
+
     }
 
     void image(uint32_t width, uint32_t height, VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& imageMemory, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB) {

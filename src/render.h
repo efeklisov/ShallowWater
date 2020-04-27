@@ -173,8 +173,13 @@ class Render {
             boolmap.haveFBO = true;
         }
 
-        Render(std::string_view _tag, VkImageLayout colorFinal = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VkImageLayout depthFinal = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        Render(std::string_view _tag, VkImageLayout colorFinal = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VkImageLayout depthFinal = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
             : tag(_tag) {
+#ifdef IMGUI_ON
+                if (colorFinal == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+                    colorFinal = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                }
+#endif
                 initPass(colorFinal, depthFinal);
                 hw::loc::cmd()->createCommandBuffers(commandBuffers, hw::loc::swapChain()->size());
             }

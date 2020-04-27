@@ -1,6 +1,8 @@
 #pragma once
 
 #include <iostream>
+#include <vector>
+#include <assert.h>
 
 class Vertex;
 
@@ -33,6 +35,11 @@ namespace hw {
                 return _swapChain;
             }
 
+            static hw::Command* comp() {
+                assert(_commandComp != NULL);
+                return _commandComp;
+            }
+
             static hw::Command* cmd() {
                 assert(_command != NULL);
                 return _command;
@@ -62,8 +69,10 @@ namespace hw {
                 _swapChain = service;
             }
 
-            static void provide(hw::Command* service) {
-                _command = service;
+            static void provide(hw::Command* service, bool compute=false) {
+                if (compute)
+                    _commandComp = service;
+                else _command = service;
             }
 
             static void provide(std::vector<Vertex>& service) {
@@ -80,6 +89,7 @@ namespace hw {
             static hw::Device* _device;
             static hw::SwapChain* _swapChain;
             static hw::Command* _command;
+            static hw::Command* _commandComp;
             static std::vector<Vertex>* _vertices;
             static std::vector<uint32_t>* _indices;
     };
@@ -90,5 +100,6 @@ hw::Surface* hw::loc::_surface;
 hw::Device* hw::loc::_device;
 hw::SwapChain* hw::loc::_swapChain;
 hw::Command* hw::loc::_command;
+hw::Command* hw::loc::_commandComp;
 std::vector<Vertex>* hw::loc::_vertices;
 std::vector<uint32_t>* hw::loc::_indices;

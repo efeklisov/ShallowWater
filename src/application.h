@@ -39,6 +39,7 @@
 #include "texture.h"
 #include "vertex.h"
 #include "descriptor.h"
+#include "compute.h"
 
 const int WIDTH = 1280;
 const int HEIGHT = 768;
@@ -46,9 +47,9 @@ const int HEIGHT = 768;
 const int MAX_FRAMES_IN_FLIGHT = 3;
 
 #ifdef NDEBUG
-const bool enableValidationLayers = false;
+    const bool enableValidationLayers = false;
 #else
-const bool enableValidationLayers = true;
+    const bool enableValidationLayers = true;
 #endif
 
 struct UniformBufferObject {
@@ -73,7 +74,11 @@ public:
     {
         initWindow();
         initVulkan();
+
+    #ifdef IMGUI_ON
         imgui = new ImGuiImpl(window);
+    #endif
+
         camera = new Camera(window, WIDTH, HEIGHT);
         mainLoop();
         cleanup();
@@ -83,6 +88,7 @@ private:
     GLFWwindow* window;
     ImGuiImpl* imgui;
 
+    Compute* comp;
     Render* water;
     Render* refraction;
     Render* reflection;
@@ -166,29 +172,81 @@ private:
         hw::loc::provide(new hw::Surface(window));
         hw::loc::provide(new hw::Device(enableValidationLayers));
         hw::loc::provide(new hw::Command());
+        hw::loc::provide(new hw::Command(VK_COMMAND_POOL_CREATE_PROTECTED_BIT, true), true);
         hw::loc::provide(new hw::SwapChain(window));
 
         hw::loc::provide(vertices);
         hw::loc::provide(indices);
 
         desc = new Descriptor();
-        desc->addLayout({{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}, 
-                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}});
-        desc->addLayout({{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, 
-                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT}});
+        desc->addLayout({
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}, 
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}
+            });
+        desc->addLayout({
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT},
+                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT}
+            });
+        desc->addLayout({
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT}
+            });
 
         desc->addPipeLayout({0}, {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants)}});
         desc->addPipeLayout({0, 1});
+        desc->addPipeLayout({2});
 
         desc->addMesh("Skybox", {0}, "models/cube.obj", new CubeMap("textures/storforsen"));
         desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
         desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
-        desc->addMesh("Quad", {0, 1}, "models/grid.obj", new Texture("textures/heightmap.jpg"), {0.0f, 1.0f, -0.5f});
+        desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -0.5f});
+        desc->addMesh("Simulation", {2});
         desc->allocate();
 
         create::vertexBuffer(vertices, vertexBuffer, vertexBufferMemory);
         create::indexBuffer(indices, indexBuffer, indexBufferMemory);
 
+        setupCompute();
+        setupRender();
+
+        createUniformBuffers();
+        bindUnisToDescriptorSets();
+
+        recordSimulationCommandBuffers();
+        recordWaterCommandBuffers();
+        recordRefractionCommandBuffers();
+        recordReflectionCommandBuffers();
+
+        createSyncObjects();
+    }
+
+    void setupCompute() {
+        comp = new Compute("simulation", 3, 300, 300);
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        create::staging("textures/heightmap.jpg", stagingBuffer, stagingBufferMemory);
+
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            hw::loc::comp()->copyBufferToImage(stagingBuffer, comp->color(i, 0), comp->extent().width, comp->extent().height);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            hw::loc::comp()->copyBufferToImage(stagingBuffer, comp->color(i, 1), comp->extent().width, comp->extent().height);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 2), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        }
+
+        hw::loc::device()->destroy(stagingBuffer);
+        hw::loc::device()->free(stagingBufferMemory);
+
+        comp->addPipeline(desc->pipeLayout(2), "shaders/simulation.comp.spv");
+    }
+
+    void setupRender() {
         water = new Render("water");
         refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         reflection = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -207,15 +265,6 @@ private:
                 render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.geom.spv", "shaders/quad.frag.spv", true, false);
             }
         }
-
-        createUniformBuffers();
-        bindUnisToDescriptorSets();
-
-        recordWaterCommandBuffers();
-        recordRefractionCommandBuffers();
-        recordReflectionCommandBuffers();
-
-        /**/ createSyncObjects();
     }
 
     void mainLoop()
@@ -241,8 +290,11 @@ private:
         for (auto& render: {water, refraction, reflection}) {
             delete render;
         }
+        delete comp;
 
+    #ifdef IMGUI_ON
         imgui->cleanup();
+    #endif
         delete hw::loc::swapChain();
 
         desc->freePool();
@@ -266,8 +318,11 @@ private:
             hw::loc::device()->destroy(inFlightFences[i]);
         }
 
+    #ifdef IMGUI_ON
         delete imgui;
+    #endif
         delete camera;
+        delete hw::loc::comp();
         delete hw::loc::cmd();
         delete hw::loc::device();
         delete hw::loc::surface();
@@ -293,31 +348,18 @@ private:
 
         hw::loc::provide(new hw::SwapChain(window));
 
-        water = new Render("water");
-        refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        reflection = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        water->setToDefaultFBO();
-        reflection->initFBO();
-        refraction->initFBO();
-
-        #pragma omp parallel for
-        for (auto& render: {water, refraction, reflection}) {
-            render->addPipeline(desc->pipeLayout(0), "shaders/base.vert.spv", "shaders/base.frag.spv");
-            render->addPipeline(desc->pipeLayout(0), "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
-            render->addPipeline(desc->pipeLayout(0), "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
-
-            if (render->tag == "water") {
-                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.frag.spv");
-            }
-        }
+        setupCompute();
+        setupRender();
         desc->allocate();
 
         createUniformBuffers();
         bindUnisToDescriptorSets();
 
+    #ifdef IMGUI_ON
         imgui->adjust();
+    #endif
 
+        recordSimulationCommandBuffers();
         recordWaterCommandBuffers();
         recordRefractionCommandBuffers();
         recordReflectionCommandBuffers();
@@ -329,6 +371,9 @@ private:
 
         #pragma omp parallel for
         for (auto& mesh : desc->meshes) {
+            if (mesh->tag == "Simulation")
+                continue;
+
             for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, desc->getUniBuffer(mesh, i, 0), desc->getUniMemory(mesh, i, 0));
@@ -350,7 +395,7 @@ private:
             imageInfo2.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             VkDescriptorImageInfo imageInfo3 = {};
-            imageInfo3.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo3.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             std::array<VkWriteDescriptorSet, 4> descriptorWrites = {};
 
@@ -382,8 +427,58 @@ private:
             descriptorWrites[3].descriptorCount = 1;
             descriptorWrites[3].pImageInfo = &imageInfo3;
 
+            VkDescriptorImageInfo computeImageInfo = {};
+            computeImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkDescriptorImageInfo computeImageInfo1 = {};
+            computeImageInfo1.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkDescriptorImageInfo computeImageInfo2 = {};
+            computeImageInfo2.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            std::array<VkWriteDescriptorSet, 3> computeWrites = {};
+
+            computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            computeWrites[0].dstBinding = 0;
+            computeWrites[0].dstArrayElement = 0;
+            computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            computeWrites[0].descriptorCount = 1;
+            computeWrites[0].pImageInfo = &computeImageInfo;
+
+            computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            computeWrites[1].dstBinding = 1;
+            computeWrites[1].dstArrayElement = 0;
+            computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            computeWrites[1].descriptorCount = 1;
+            computeWrites[1].pImageInfo = &computeImageInfo1;
+
+            computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            computeWrites[2].dstBinding = 2;
+            computeWrites[2].dstArrayElement = 0;
+            computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            computeWrites[2].descriptorCount = 1;
+            computeWrites[2].pImageInfo = &computeImageInfo2;
+
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Simulation") {
+                    computeWrites[0].dstSet = desc->getDescriptor(mesh, i, 0);
+                    computeWrites[1].dstSet = desc->getDescriptor(mesh, i, 0);
+                    computeWrites[2].dstSet = desc->getDescriptor(mesh, i, 0);
+
+                    computeImageInfo.imageView = comp->colorView(i, 0);
+                    computeImageInfo.sampler = comp->colorSampler(i, 0);
+
+                    computeImageInfo1.imageView = comp->colorView(i, 1);
+                    computeImageInfo1.sampler = comp->colorSampler(i, 1);
+
+                    computeImageInfo2.imageView = comp->colorView(i, 2);
+                    computeImageInfo2.sampler = comp->colorSampler(i, 2);
+
+                    hw::loc::device()->update(static_cast<uint32_t>(3), computeWrites.data());
+                    continue;
+                }
+
                 descriptorWrites[0].dstSet = desc->getDescriptor(mesh, i, 0);
                 descriptorWrites[1].dstSet = desc->getDescriptor(mesh, i, 0);
 
@@ -399,16 +494,126 @@ private:
                     imageInfo2.imageView = reflection->colorView(i);
                     imageInfo2.sampler = reflection->colorSampler(i);
 
-                    imageInfo3.imageView = mesh->texture->view();
-                    imageInfo3.sampler = mesh->texture->sampler();
+                    imageInfo3.imageView = comp->colorView(i, 2);
+                    imageInfo3.sampler = comp->colorSampler(i, 2);
 
-                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data());
+                    hw::loc::device()->update(static_cast<uint32_t>(4), descriptorWrites.data());
                 } else {
                     imageInfo.imageView = mesh->texture->view();
                     imageInfo.sampler = mesh->texture->sampler();
-                    hw::loc::device()->update(static_cast<uint32_t>(descriptorWrites.size() - 2), descriptorWrites.data());
+                    hw::loc::device()->update(static_cast<uint32_t>(2), descriptorWrites.data());
                 }
             }
+        }
+    }
+
+    void recordSimulationCommandBuffers() {
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+            hw::loc::comp()->startBuffer(comp->commandBuffer(i));
+
+            for (auto& mesh: desc->meshes) {
+                if (mesh->tag == "Simulation") {
+
+                    hw::loc::comp()->barrier(
+                            comp->commandBuffer(i), 
+                            0, VK_ACCESS_SHADER_READ_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                        );
+
+                    desc->bindDescriptors(comp->commandBuffer(i), mesh, i, 2, true);
+                    vkCmdBindPipeline(comp->commandBuffer(i), VK_PIPELINE_BIND_POINT_COMPUTE, comp->pipeline(0));
+                    vkCmdDispatch(comp->commandBuffer(i), comp->extent().width / 15, comp->extent().height / 15, 1);
+
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 1),
+                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                        );
+                    
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 0),
+                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                        );
+
+                    hw::loc::comp()->barrier(
+                            comp->commandBuffer(i), 
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                        );
+
+                    VkImageCopy imageCopy =  {
+                                {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                                {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                                {300, 300, 1}
+                        };
+
+                    vkCmdCopyImage(
+                            comp->commandBuffer(i),
+                            comp->color(i, 1), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            comp->color(i, 0), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            1, &imageCopy
+                        );
+
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 0),
+                            VK_ACCESS_SHADER_READ_BIT, 0, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
+                        );
+
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 1),
+                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                        );
+                    
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 2),
+                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                        );
+
+                    hw::loc::comp()->barrier(
+                            comp->commandBuffer(i), 
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                        );
+                    
+                    vkCmdCopyImage(
+                            comp->commandBuffer(i),
+                            comp->color(i, 2), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            comp->color(i, 1), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            1, &imageCopy
+                        );
+
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 1),
+                            VK_ACCESS_SHADER_READ_BIT, 0, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
+                        );
+                    
+                    hw::loc::comp()->imageBarrier(
+                            comp->commandBuffer(i), comp->color(i, 2),
+                            VK_ACCESS_SHADER_READ_BIT, 0, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
+                        );
+
+                    hw::loc::comp()->barrier(
+                            comp->commandBuffer(i), 
+                            VK_ACCESS_SHADER_READ_BIT, 0, 
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                        );
+                }
+            }
+
+            hw::loc::comp()->endBuffer(comp->commandBuffer(i));
         }
     }
 
@@ -424,6 +629,9 @@ private:
 
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Simulation")
+                    continue;
+
                 vkCmdPushConstants(water->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
 
                 if (mesh->tag != "Quad")
@@ -464,6 +672,9 @@ private:
 
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Simulation")
+                    continue;
+
                 if (mesh->tag == "Quad")
                     continue;
 
@@ -502,6 +713,9 @@ private:
 
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Simulation")
+                    continue;
+
                 if (mesh->tag == "Quad")
                     continue;
 
@@ -559,6 +773,9 @@ private:
 
         #pragma omp parallel for
         for (auto& mesh : desc->meshes) {
+            if (mesh->tag == "Simulation")
+                continue;
+
             glm::mat4 position;
             glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh->rotation)));
             glm::mat4 scale;
@@ -588,6 +805,7 @@ private:
 
     void drawFrame()
     {
+    #ifdef IMGUI_ON
         // IMGUI
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -595,6 +813,7 @@ private:
         /* ImGui::Text("Clip Distance Change"); */
         /* ImGui::SliderFloat("Height", &clipPlane.w, -10.0f, 10.0f); */
         ImGui::Render();
+    #endif
 
         hw::loc::device()->waitFence(inFlightFences[currentFrame]);
 
@@ -603,7 +822,9 @@ private:
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapChain();
+        #ifdef IMGUI_ON
             ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
+        #endif
             return;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
@@ -618,15 +839,20 @@ private:
         }
         imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
+    #ifdef IMGUI_ON
         // Render IMGUI
         imgui->recordCommandBuffer(imageIndex);
+    #endif
 
         // Submit
-        std::array<VkCommandBuffer, 4> submitCommandBuffers = {
+        std::vector<VkCommandBuffer> submitCommandBuffers = {
+            comp->commandBuffer(imageIndex),
             refraction->commandBuffer(imageIndex),
             reflection->commandBuffer(imageIndex),
             water->commandBuffer(imageIndex),
+        #ifdef IMGUI_ON
             imgui->getCommandBuffer(imageIndex)
+        #endif
         };
 
         VkSubmitInfo submitInfo = {};
@@ -667,7 +893,9 @@ private:
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
+        #ifdef IMGUI_ON
             ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
+        #endif
         } else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");
         }
