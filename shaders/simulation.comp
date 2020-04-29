@@ -1,19 +1,53 @@
 #version 450
 
-layout (local_size_x = 15, local_size_y = 15) in;
-layout (binding = 0, rgba8) uniform readonly image2D prevImage;
-layout (binding = 1, rgba8) uniform readonly image2D currImage;
-layout (binding = 2, rgba8) uniform image2D nextImage;
+layout (local_size_x = 32, local_size_y = 32) in;
+layout (binding = 0, rgba16) uniform readonly image2D prevImage;
+layout (binding = 1, rgba16) uniform readonly image2D currImage;
+layout (binding = 2, rgba16) uniform image2D nextImage;
+
+layout(binding = 3) uniform UserSimulationInput {
+    vec4 mouse;
+} usi;
 
 #define RELAX 1.985
+#define WIDTH 1024
+#define HEIGHT 1024
 
 void main() {
-    vec4 hPrev = imageLoad(prevImage, ivec2(gl_GlobalInvocationID.xy));
-    vec4 hUp = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(0, 1));
-    vec4 hDown = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(0, -1));
-    vec4 hLeft = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(-1, 0));
-    vec4 hRight = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(1, 0));
+    if (gl_GlobalInvocationID.x >= WIDTH || gl_GlobalInvocationID.y >= HEIGHT)
+        return;
 
-    vec4 height = (1.0 - RELAX) * hPrev + (RELAX / 4.0) * (hUp + hDown + hLeft + hRight);
-    imageStore(nextImage, ivec2(gl_GlobalInvocationID.xy), height);
+    if (usi.mouse.z > 0.0) {
+        if ((gl_GlobalInvocationID.x >= WIDTH / 2 - 1) && (gl_GlobalInvocationID.x <= WIDTH / 2 + 1) 
+                && (gl_GlobalInvocationID.y >= HEIGHT / 2 - 1) && (gl_GlobalInvocationID.y <= HEIGHT / 2 + 1)) {
+
+            imageStore(nextImage, ivec2(gl_GlobalInvocationID.xy), vec4(-2.0));
+            return;
+        }
+    }
+
+    vec4 hPrev = imageLoad(prevImage, ivec2(gl_GlobalInvocationID.xy));
+
+    vec4 hUp;
+    if (gl_GlobalInvocationID.y - 1 < 0)
+        hUp = vec4(0);
+    else hUp = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(0, -1));
+
+    vec4 hDown;
+    if (gl_GlobalInvocationID.y - 1 >= HEIGHT)
+        hDown = vec4(0);
+    else hDown = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(0, 1));
+
+    vec4 hLeft;
+    if (gl_GlobalInvocationID.x - 1 < 0)
+        hLeft = vec4(0);
+    else hLeft = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(-1, 0));
+
+    vec4 hRight;
+    if (gl_GlobalInvocationID.x + 1 >= WIDTH)
+        hRight = vec4(0);
+    else hRight = imageLoad(currImage, ivec2(gl_GlobalInvocationID.xy) + ivec2(1, 0));
+
+    vec4 height = (1.0 - RELAX) * hPrev + RELAX * 0.25 * (hUp + hDown + hLeft + hRight);
+    imageStore(nextImage, ivec2(gl_GlobalInvocationID.xy), clamp(height, -1, 1));
 }

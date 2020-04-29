@@ -277,16 +277,24 @@ namespace hw {
                 vkBindBufferMemory(device, image, memory, 0);
             }
 
-            void submit(VkSubmitInfo& submitInfo, VkFence fence) {
+            void submitGraphics(VkSubmitInfo& submitInfo, VkFence fence) {
                 vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence);
+            }
+
+            void submitCompute(VkSubmitInfo& submitInfo, VkFence fence) {
+                vkQueueSubmit(computeQueue, 1, &submitInfo, fence);
             }
 
             VkResult present(VkPresentInfoKHR& presentInfo) {
                 return vkQueuePresentKHR(presentQueue, &presentInfo);
             }
 
-            void waitQueue() {
+            void waitGraphics() {
                 vkQueueWaitIdle(graphicsQueue);
+            }
+
+            void waitCompute() {
+                vkQueueWaitIdle(computeQueue);
             }
 
             void waitFence(VkFence& fence) {
@@ -496,7 +504,7 @@ namespace hw {
                         indices.graphicsFamily = i;
                     }
 
-                    if (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+                    if ((queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) && (indices.graphicsFamily != i) && (indices.presentFamily != i)) {
                         indices.computeFamily = i;
                     }
 

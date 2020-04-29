@@ -10,8 +10,10 @@
 namespace hw {
     class Command {
         public:
-            Command(VkCommandPoolCreateFlagBits flags=VK_COMMAND_POOL_CREATE_PROTECTED_BIT, bool compute=false) {
+            Command(VkCommandPoolCreateFlagBits flags=VK_COMMAND_POOL_CREATE_PROTECTED_BIT, bool _compute=false) {
                 hw::QueueFamilyIndices queueFamilyIndices = hw::loc::device()->findQueueFamilies();
+
+                compute = _compute;
 
                 VkCommandPoolCreateInfo poolInfo = {};
                 poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -65,6 +67,12 @@ namespace hw {
 
                     sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
                     destinationStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+                } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+                    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+                    sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+                    destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
                 } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
                     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
                     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -131,6 +139,25 @@ namespace hw {
                         1, &midBarrier,
                         0, nullptr,
                         0, nullptr);
+            }
+
+            void copyImageToImage(VkImage& image1, VkImage& image2, uint32_t width, uint32_t height) {
+                VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+                VkImageCopy imageCopy =  {
+                            {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                            {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
+                            {width, height, 1}
+                    };
+
+                vkCmdCopyImage(
+                        commandBuffer,
+                        image1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        image2, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &imageCopy
+                    );
+
+                endSingleTimeCommands(commandBuffer);
             }
 
             void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height, int layerCount=1) {
@@ -231,12 +258,18 @@ namespace hw {
                 submitInfo.commandBufferCount = 1;
                 submitInfo.pCommandBuffers = &commandBuffer;
 
-                hw::loc::device()->submit(submitInfo, VK_NULL_HANDLE);
-                hw::loc::device()->waitQueue();
+                if (compute) {
+                    hw::loc::device()->submitCompute(submitInfo, VK_NULL_HANDLE);
+                    hw::loc::device()->waitCompute();
+                } else {
+                    hw::loc::device()->submitGraphics(submitInfo, VK_NULL_HANDLE);
+                    hw::loc::device()->waitGraphics();
+                }
 
                 hw::loc::device()->free(commandPool, 1, &commandBuffer);
             }
 
             VkCommandPool commandPool;
+            bool compute = false;
     };
 }

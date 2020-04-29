@@ -41,8 +41,8 @@
 #include "descriptor.h"
 #include "compute.h"
 
-const int WIDTH = 1280;
-const int HEIGHT = 768;
+const int WIDTH = 1440;
+const int HEIGHT = 900;
 
 const int MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -59,6 +59,10 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 invertView;
     alignas(16) glm::mat4 invertModel;
     alignas(16) glm::vec4 cameraPos;
+};
+
+struct UserSimulationInput {
+    alignas(16) glm::vec4 mouse;
 };
 
 struct PushConstants {
@@ -112,6 +116,7 @@ private:
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
 
+    std::vector<VkSemaphore> computeFinishedSemaphores;
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
@@ -190,7 +195,8 @@ private:
         desc->addLayout({
                 {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
                 {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
-                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT}
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT},
+                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT} 
             });
 
         desc->addPipeLayout({0}, {{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants)}});
@@ -200,7 +206,8 @@ private:
         desc->addMesh("Skybox", {0}, "models/cube.obj", new CubeMap("textures/storforsen"));
         desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
         desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
-        desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -0.5f});
+        /* desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}); */
+        desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -2.0f}, {0.0f, 0.0f, 0.0f}, {10.0f, 1.0f, 12.0f});
         desc->addMesh("Simulation", {2});
         desc->allocate();
 
@@ -222,22 +229,22 @@ private:
     }
 
     void setupCompute() {
-        comp = new Compute("simulation", 3, 300, 300);
+        comp = new Compute("simulation", 3, 1024, 1024);
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
         create::staging("textures/heightmap.jpg", stagingBuffer, stagingBufferMemory);
 
         for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
-            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             hw::loc::comp()->copyBufferToImage(stagingBuffer, comp->color(i, 0), comp->extent().width, comp->extent().height);
-            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 0), VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
 
-            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             hw::loc::comp()->copyBufferToImage(stagingBuffer, comp->color(i, 1), comp->extent().width, comp->extent().height);
-            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 1), VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
 
-            hw::loc::comp()->transitionImageLayout(comp->color(i, 2), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+            hw::loc::comp()->transitionImageLayout(comp->color(i, 2), VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         }
 
         hw::loc::device()->destroy(stagingBuffer);
@@ -264,6 +271,30 @@ private:
             if (render->tag == "water") {
                 render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.geom.spv", "shaders/quad.frag.spv", true, false);
             }
+        }
+    }
+
+    void createSyncObjects()
+    {
+        computeFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        imagesInFlight.resize(hw::loc::swapChain()->size(), VK_NULL_HANDLE);
+
+        VkSemaphoreCreateInfo semaphoreInfo = {};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo = {};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        #pragma omp parallel for
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            hw::loc::device()->create(semaphoreInfo, computeFinishedSemaphores[i]);
+            hw::loc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
+            hw::loc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
+            hw::loc::device()->create(fenceInfo, inFlightFences[i]);
         }
     }
 
@@ -315,6 +346,7 @@ private:
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             hw::loc::device()->destroy(renderFinishedSemaphores[i]);
             hw::loc::device()->destroy(imageAvailableSemaphores[i]);
+            hw::loc::device()->destroy(computeFinishedSemaphores[i]);
             hw::loc::device()->destroy(inFlightFences[i]);
         }
 
@@ -371,10 +403,13 @@ private:
 
         #pragma omp parallel for
         for (auto& mesh : desc->meshes) {
-            if (mesh->tag == "Simulation")
-                continue;
-
             for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+                if (mesh->tag == "Simulation") {
+                    create::buffer(sizeof(UserSimulationInput), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, desc->getUniBuffer(mesh, i, 0), desc->getUniMemory(mesh, i, 0));
+                    continue;
+                }
+
                 create::buffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, desc->getUniBuffer(mesh, i, 0), desc->getUniMemory(mesh, i, 0));
             }
@@ -398,33 +433,16 @@ private:
             imageInfo3.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             std::array<VkWriteDescriptorSet, 4> descriptorWrites = {};
-
-            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].dstBinding = 0;
-            descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0] = desc->writeSet(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0);
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstBinding = 1;
-            descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1] = desc->writeSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1);
             descriptorWrites[1].pImageInfo = &imageInfo;
 
-            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[2].dstBinding = 0;
-            descriptorWrites[2].dstArrayElement = 0;
-            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2] = desc->writeSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0);
             descriptorWrites[2].pImageInfo = &imageInfo2;
 
-            descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[3].dstBinding = 1;
-            descriptorWrites[3].dstArrayElement = 0;
-            descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[3].descriptorCount = 1;
+            descriptorWrites[3] = desc->writeSet(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1);
             descriptorWrites[3].pImageInfo = &imageInfo3;
 
             VkDescriptorImageInfo computeImageInfo = {};
@@ -436,46 +454,43 @@ private:
             VkDescriptorImageInfo computeImageInfo2 = {};
             computeImageInfo2.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            std::array<VkWriteDescriptorSet, 3> computeWrites = {};
+            VkDescriptorBufferInfo computeBuffer = {};
+            computeBuffer.offset = 0;
+            computeBuffer.range = sizeof(UserSimulationInput);
 
-            computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[0].dstBinding = 0;
-            computeWrites[0].dstArrayElement = 0;
-            computeWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            computeWrites[0].descriptorCount = 1;
+            std::array<VkWriteDescriptorSet, 4> computeWrites = {};
+            computeWrites[0] = desc->writeSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0);
             computeWrites[0].pImageInfo = &computeImageInfo;
 
-            computeWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[1].dstBinding = 1;
-            computeWrites[1].dstArrayElement = 0;
-            computeWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            computeWrites[1].descriptorCount = 1;
+            computeWrites[1] = desc->writeSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1);
             computeWrites[1].pImageInfo = &computeImageInfo1;
 
-            computeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            computeWrites[2].dstBinding = 2;
-            computeWrites[2].dstArrayElement = 0;
-            computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            computeWrites[2].descriptorCount = 1;
+            computeWrites[2] = desc->writeSet(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2);
             computeWrites[2].pImageInfo = &computeImageInfo2;
 
+            computeWrites[3] = desc->writeSet(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3);
+            computeWrites[3].pBufferInfo = &computeBuffer;
+            
             #pragma omp parallel for
             for (auto& mesh : desc->meshes) {
                 if (mesh->tag == "Simulation") {
                     computeWrites[0].dstSet = desc->getDescriptor(mesh, i, 0);
                     computeWrites[1].dstSet = desc->getDescriptor(mesh, i, 0);
                     computeWrites[2].dstSet = desc->getDescriptor(mesh, i, 0);
+                    computeWrites[3].dstSet = desc->getDescriptor(mesh, i, 0);
 
-                    computeImageInfo.imageView = comp->colorView(i, 0);
-                    computeImageInfo.sampler = comp->colorSampler(i, 0);
+                    computeImageInfo.imageView = comp->colorView(0, 0);
+                    computeImageInfo.sampler = comp->colorSampler(0, 0);
 
-                    computeImageInfo1.imageView = comp->colorView(i, 1);
-                    computeImageInfo1.sampler = comp->colorSampler(i, 1);
+                    computeImageInfo1.imageView = comp->colorView(0, 1);
+                    computeImageInfo1.sampler = comp->colorSampler(0, 1);
 
-                    computeImageInfo2.imageView = comp->colorView(i, 2);
-                    computeImageInfo2.sampler = comp->colorSampler(i, 2);
+                    computeImageInfo2.imageView = comp->colorView(0, 2);
+                    computeImageInfo2.sampler = comp->colorSampler(0, 2);
 
-                    hw::loc::device()->update(static_cast<uint32_t>(3), computeWrites.data());
+                    computeBuffer.buffer = desc->getUniBuffer(mesh, i, 0);
+
+                    hw::loc::device()->update(static_cast<uint32_t>(4), computeWrites.data());
                     continue;
                 }
 
@@ -494,8 +509,8 @@ private:
                     imageInfo2.imageView = reflection->colorView(i);
                     imageInfo2.sampler = reflection->colorSampler(i);
 
-                    imageInfo3.imageView = comp->colorView(i, 2);
-                    imageInfo3.sampler = comp->colorSampler(i, 2);
+                    imageInfo3.imageView = comp->colorView(0, 2);
+                    imageInfo3.sampler = comp->colorSampler(0, 2);
 
                     hw::loc::device()->update(static_cast<uint32_t>(4), descriptorWrites.data());
                 } else {
@@ -522,93 +537,75 @@ private:
 
                     desc->bindDescriptors(comp->commandBuffer(i), mesh, i, 2, true);
                     vkCmdBindPipeline(comp->commandBuffer(i), VK_PIPELINE_BIND_POINT_COMPUTE, comp->pipeline(0));
-                    vkCmdDispatch(comp->commandBuffer(i), comp->extent().width / 15, comp->extent().height / 15, 1);
+                    vkCmdDispatch(comp->commandBuffer(i), comp->extent().width / 32, comp->extent().height / 32, 1);
 
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 1),
+                            comp->commandBuffer(i), comp->color(0, 1),
                             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                         );
                     
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 0),
+                            comp->commandBuffer(i), comp->color(0, 0),
                             VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
                         );
 
-                    hw::loc::comp()->barrier(
-                            comp->commandBuffer(i), 
-                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                        );
-
                     VkImageCopy imageCopy =  {
                                 {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
                                 {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0},
-                                {300, 300, 1}
+                                {comp->extent().width, comp->extent().height, 1}
                         };
 
                     vkCmdCopyImage(
                             comp->commandBuffer(i),
-                            comp->color(i, 1), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            comp->color(i, 0), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            comp->color(0, 1), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            comp->color(0, 0), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             1, &imageCopy
                         );
 
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 0),
-                            VK_ACCESS_SHADER_READ_BIT, 0, 
+                            comp->commandBuffer(i), comp->color(0, 0),
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
                         );
 
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 1),
-                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            comp->commandBuffer(i), comp->color(0, 1),
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
                         );
                     
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 2),
-                            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT, 
+                            comp->commandBuffer(i), comp->color(0, 2),
+                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                         );
 
-                    hw::loc::comp()->barrier(
-                            comp->commandBuffer(i), 
-                            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, 
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                        );
-                    
                     vkCmdCopyImage(
                             comp->commandBuffer(i),
-                            comp->color(i, 2), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            comp->color(i, 1), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            comp->color(0, 2), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            comp->color(0, 1), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             1, &imageCopy
                         );
 
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 1),
+                            comp->commandBuffer(i), comp->color(0, 1),
                             VK_ACCESS_SHADER_READ_BIT, 0, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
                         );
                     
                     hw::loc::comp()->imageBarrier(
-                            comp->commandBuffer(i), comp->color(i, 2),
+                            comp->commandBuffer(i), comp->color(0, 2),
                             VK_ACCESS_SHADER_READ_BIT, 0, 
                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL
-                        );
-
-                    hw::loc::comp()->barrier(
-                            comp->commandBuffer(i), 
-                            VK_ACCESS_SHADER_READ_BIT, 0, 
-                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
                         );
                 }
             }
@@ -740,28 +737,6 @@ private:
         }
     }
 
-    void createSyncObjects()
-    {
-        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-        imagesInFlight.resize(hw::loc::swapChain()->size(), VK_NULL_HANDLE);
-
-        VkSemaphoreCreateInfo semaphoreInfo = {};
-        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-        VkFenceCreateInfo fenceInfo = {};
-        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-        #pragma omp parallel for
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            hw::loc::device()->create(semaphoreInfo, imageAvailableSemaphores[i]);
-            hw::loc::device()->create(semaphoreInfo, renderFinishedSemaphores[i]);
-            hw::loc::device()->create(fenceInfo, inFlightFences[i]);
-        }
-    }
-
     void updateUniformBuffer(uint32_t currentImage)
     {
         UniformBufferObject ubo = {};
@@ -773,8 +748,17 @@ private:
 
         #pragma omp parallel for
         for (auto& mesh : desc->meshes) {
-            if (mesh->tag == "Simulation")
+            if (mesh->tag == "Simulation") {
+                UserSimulationInput usi = {};
+                usi.mouse = glm::vec4(0.0f);
+                usi.mouse.z = (camera->mousePressed) ? 1.0f : 0.0f;
+
+                void* data;
+                hw::loc::device()->map(desc->getUniMemory(mesh, currentImage, 0), sizeof(usi), data);
+                memcpy(data, &usi, sizeof(usi));
+                hw::loc::device()->unmap(desc->getUniMemory(mesh, currentImage, 0));
                 continue;
+            }
 
             glm::mat4 position;
             glm::mat4 rotation = glm::mat4_cast(glm::normalize(glm::quat(mesh->rotation)));
@@ -845,59 +829,81 @@ private:
     #endif
 
         // Submit
-        std::vector<VkCommandBuffer> submitCommandBuffers = {
-            comp->commandBuffer(imageIndex),
-            refraction->commandBuffer(imageIndex),
-            reflection->commandBuffer(imageIndex),
-            water->commandBuffer(imageIndex),
-        #ifdef IMGUI_ON
-            imgui->getCommandBuffer(imageIndex)
-        #endif
-        };
+        {
+            std::vector<VkCommandBuffer> submitBuffers = {
+                comp->commandBuffer(imageIndex),
+            };
 
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
+            VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT };
+            VkSemaphore signalSemaphores[] = { computeFinishedSemaphores[currentFrame] };
 
-        VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
-        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
+            VkSubmitInfo submitInfo = {};
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = waitSemaphores;
+            submitInfo.pWaitDstStageMask = waitStages;
+            submitInfo.commandBufferCount = static_cast<uint32_t>(submitBuffers.size());
+            submitInfo.pCommandBuffers = submitBuffers.data();
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = signalSemaphores;
 
-        submitInfo.commandBufferCount = static_cast<uint32_t>(submitCommandBuffers.size());
-        submitInfo.pCommandBuffers = submitCommandBuffers.data();
+            hw::loc::device()->submitCompute(submitInfo, VK_NULL_HANDLE);
+        }
 
-        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = signalSemaphores;
+        {
+            std::vector<VkCommandBuffer> submitCommandBuffers = {
+                refraction->commandBuffer(imageIndex),
+                reflection->commandBuffer(imageIndex),
+                water->commandBuffer(imageIndex),
+            #ifdef IMGUI_ON
+                imgui->getCommandBuffer(imageIndex),
+            #endif
+            };
 
-        hw::loc::device()->reset(inFlightFences[currentFrame]);
+            VkSemaphore waitSemaphores[] = { computeFinishedSemaphores[currentFrame] };
+            VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+            VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 
-        hw::loc::device()->submit(submitInfo, inFlightFences[currentFrame]);
+            VkSubmitInfo submitInfo = {};
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = waitSemaphores;
+            submitInfo.pWaitDstStageMask = waitStages;
+            submitInfo.commandBufferCount = static_cast<uint32_t>(submitCommandBuffers.size());
+            submitInfo.pCommandBuffers = submitCommandBuffers.data();
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = signalSemaphores;
+
+            hw::loc::device()->reset(inFlightFences[currentFrame]);
+            hw::loc::device()->submitGraphics(submitInfo, inFlightFences[currentFrame]);
+        }
 
         // Present Frame
-        VkPresentInfoKHR presentInfo = {};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        {
+            VkSwapchainKHR swapChains[] = { hw::loc::swapChain()->get() };
 
-        presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = signalSemaphores;
+            VkSemaphore waitSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 
-        VkSwapchainKHR swapChains[] = { hw::loc::swapChain()->get() };
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = swapChains;
+            VkPresentInfoKHR presentInfo = {};
+            presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            presentInfo.waitSemaphoreCount = 1;
+            presentInfo.pWaitSemaphores = waitSemaphores;
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = swapChains;
+            presentInfo.pImageIndices = &imageIndex;
 
-        presentInfo.pImageIndices = &imageIndex;
+            result = hw::loc::device()->present(presentInfo);
 
-        result = hw::loc::device()->present(presentInfo);
-
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
-            framebufferResized = false;
-            recreateSwapChain();
-        #ifdef IMGUI_ON
-            ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
-        #endif
-        } else if (result != VK_SUCCESS) {
-            throw std::runtime_error("failed to present swap chain image!");
+            if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+                framebufferResized = false;
+                recreateSwapChain();
+            #ifdef IMGUI_ON
+                ImGui_ImplVulkan_SetMinImageCount(hw::loc::swapChain()->size());
+            #endif
+            } else if (result != VK_SUCCESS) {
+                throw std::runtime_error("failed to present swap chain image!");
+            }
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;

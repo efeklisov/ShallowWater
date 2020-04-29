@@ -263,6 +263,17 @@ class Descriptor {
             return uniMemory[frame][mesh->uniform.start + buffer];
         }
 
+        static VkWriteDescriptorSet writeSet(VkDescriptorType descriptorType, uint32_t binding) {
+            VkWriteDescriptorSet descriptorWrite = {};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstBinding = binding;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = descriptorType;
+            descriptorWrite.descriptorCount = 1;
+
+            return descriptorWrite;
+        }
+
         std::vector<Mesh*> meshes;
 
     private:

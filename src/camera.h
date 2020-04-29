@@ -70,6 +70,9 @@ class Camera {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                 glfwSetCursorPosCallback(window, nullptr);
             }
+            if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS) {
+                mousePressed = true;
+            } else mousePressed = false;
         }
 
         glm::vec3 distance(glm::vec3& _cameraPos) {
@@ -100,6 +103,9 @@ class Camera {
         glm::mat4 viewI;
         glm::mat4 proj;
         glm::vec3 cameraPos = glm::vec3(0.0f, 4.f, -7.0f);
+
+        bool mousePressed = false;
+        glm::vec2 mousePosition = glm::vec2(0.0f, 0.0f);
 
     private:
         GLFWwindow *window;

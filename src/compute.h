@@ -96,8 +96,8 @@ class Compute {
 
             #pragma omp parallel for
             for (size_t i = 0; i < imageCount * hw::loc::swapChain()->size(); i++) {
-                create::image(width, height, usage, colorImages[i], colorMemory[i], VK_FORMAT_R8G8B8A8_UNORM);
-                colorImageViews[i] = create::imageView(colorImages[i], VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+                create::image(width, height, usage, colorImages[i], colorMemory[i], VK_FORMAT_R16G16B16A16_SFLOAT);
+                colorImageViews[i] = create::imageView(colorImages[i], VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT);
                 create::sampler(colorSamplers[i]);
             }
         }

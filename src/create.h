@@ -148,9 +148,11 @@ namespace create {
     }
 
     void staging(std::string_view filename, VkBuffer& stagingBuffer, VkDeviceMemory& stagingBufferMemory) {
+        stbi_ldr_to_hdr_gamma(1.0f);
+
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(filename.data(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
+        float* pixels = stbi_loadf(filename.data(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4 * sizeof(float);
 
         if (!pixels) {
             throw std::runtime_error("failed to load texture image!");
