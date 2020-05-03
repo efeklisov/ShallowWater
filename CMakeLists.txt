@@ -25,3 +25,8 @@ add_executable (engine src/main.cpp
     external/imgui/imgui_impl_vulkan.cpp)
 
 target_link_libraries (engine glfw)
+# If doesn't link try this:
+# target_link_libraries (engine glfw -ldl)
+
+file (COPY models/ DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/models)
+file (COPY textures/ DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/textures)
