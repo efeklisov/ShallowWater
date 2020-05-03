@@ -104,6 +104,8 @@ class Render {
             assert(!boolmap.haveFBO);
             fboExtent = {width, height};
 
+            frameBuffers.resize(hw::loc::swapChain()->size());
+
             for (size_t i = 0; i < hw::loc::swapChain()->size(); i++) {
                 std::array<VkImageView, 2> attachments = {
                     hw::loc::swapChain()->view(i),
@@ -119,7 +121,7 @@ class Render {
                 framebufferInfo.height = height;
                 framebufferInfo.layers = 1;
 
-                hw::loc::device()->create(framebufferInfo, hw::loc::swapChain()->frameBuffer(i));
+                hw::loc::device()->create(framebufferInfo, frameBuffers[i]);
             }
 
             boolmap.havedefaultFBO = true;
@@ -198,9 +200,11 @@ class Render {
                     hw::loc::device()->destroy(depthImageViews[i]);
                     hw::loc::device()->destroy(depthSamplers[i]);
                     hw::loc::device()->free(depthMemory[i]);
-
-                    hw::loc::device()->destroy(frameBuffers[i]);
                 }
+            }
+
+            for (uint32_t i = 0; i < frameBuffers.size(); i++) {
+                hw::loc::device()->destroy(frameBuffers[i]);
             }
 
             for (auto& pipe : pipelines) {
@@ -395,10 +399,7 @@ class Render {
 
         VkFramebuffer& frameBuffer(uint32_t& index)
         {
-            if (boolmap.haveFBO)
-                return frameBuffers[index];
-            else if (boolmap.havedefaultFBO)
-                return hw::loc::swapChain()->frameBuffer(index);
+            return frameBuffers[index];
             throw std::runtime_error("No FBO assigned");
         }
 

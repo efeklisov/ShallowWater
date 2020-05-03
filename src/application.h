@@ -94,6 +94,7 @@ private:
 
     Compute* comp;
     Render* water;
+    Render* grid;
     Render* refraction;
     Render* reflection;
 
@@ -123,6 +124,7 @@ private:
     std::vector<VkFence> imagesInFlight;
 
     bool framebufferResized = false;
+    bool gridMode = false;
 
     void initWindow()
     {
@@ -136,6 +138,7 @@ private:
 
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetCursorPosCallback(window, mouse_callback);
+        glfwSetMouseButtonCallback(window, mouse_button_callback);
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
@@ -147,8 +150,13 @@ private:
     static void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     {
         auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
-
         app->camera->processMouse(xpos, ypos);
+    }
+
+    static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+    {
+        auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+        app->camera->mouseButton(button, action);
     }
 
     void showFPS()
@@ -206,7 +214,7 @@ private:
         desc->addMesh("Skybox", {0}, "models/cube.obj", new CubeMap("textures/storforsen"));
         desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
         desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
-        /* desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}); */
+        desc->addMesh("Football", {0}, "models/football.obj", new Texture("textures/football.png"), {-1.0f, -1.5f, 0.0f}, {0.3, PI, -PI / 12}, {0.7f, 0.7f, 0.7f});
         desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -2.0f}, {0.0f, 0.0f, 0.0f}, {10.0f, 1.0f, 12.0f});
         desc->addMesh("Simulation", {2});
         desc->allocate();
@@ -222,6 +230,7 @@ private:
 
         recordSimulationCommandBuffers();
         recordWaterCommandBuffers();
+        recordGridCommandBuffers();
         recordRefractionCommandBuffers();
         recordReflectionCommandBuffers();
 
@@ -255,21 +264,26 @@ private:
 
     void setupRender() {
         water = new Render("water");
+        grid = new Render("grid");
         refraction = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         reflection = new Render("refraction", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         water->setToDefaultFBO();
+        grid->setToDefaultFBO();
         reflection->initFBO();
         refraction->initFBO();
 
         #pragma omp parallel for
-        for (auto& render: {water, refraction, reflection}) {
+        for (auto& render: {water, grid, refraction, reflection}) {
             render->addPipeline(desc->pipeLayout(0), "shaders/base.vert.spv", "shaders/base.frag.spv");
             render->addPipeline(desc->pipeLayout(0), "shaders/skybox.vert.spv", "shaders/skybox.frag.spv", false);
             render->addPipeline(desc->pipeLayout(0), "shaders/lighting.vert.spv", "shaders/lighting.frag.spv");
 
             if (render->tag == "water") {
                 render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.geom.spv", "shaders/quad.frag.spv", true, false);
+            }
+            if (render->tag == "grid") {
+                render->addPipeline(desc->pipeLayout(1), "shaders/quad.vert.spv", "shaders/quad.geom.spv", "shaders/quad.frag.spv", true, true);
             }
         }
     }
@@ -318,7 +332,7 @@ private:
 
     void cleanupSwapChain()
     {
-        for (auto& render: {water, refraction, reflection}) {
+        for (auto& render: {water, grid, refraction, reflection}) {
             delete render;
         }
         delete comp;
@@ -393,6 +407,7 @@ private:
 
         recordSimulationCommandBuffers();
         recordWaterCommandBuffers();
+        recordGridCommandBuffers();
         recordRefractionCommandBuffers();
         recordReflectionCommandBuffers();
     }
@@ -639,7 +654,7 @@ private:
                 vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh->tag == "Chalet")
+                if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(0));
                 else if (mesh->tag == "Skybox")
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(1));
@@ -653,6 +668,48 @@ private:
 
             water->endPass(i);
             hw::loc::cmd()->endBuffer(water->commandBuffer(i));
+        }
+    }
+
+    void recordGridCommandBuffers()
+    {
+        for (uint32_t i = 0; i < hw::loc::swapChain()->size(); i++) {
+            hw::loc::cmd()->startBuffer(grid->commandBuffer(i));
+            grid->startPass(i);
+
+            VkDeviceSize offsets[] = { 0 };
+
+            PushConstants pushConstants;
+
+            #pragma omp parallel for
+            for (auto& mesh : desc->meshes) {
+                if (mesh->tag == "Simulation")
+                    continue;
+
+                vkCmdPushConstants(grid->commandBuffer(i), desc->pipeLayout(0), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pushConstants);
+
+                if (mesh->tag != "Quad")
+                    desc->bindDescriptors(grid->commandBuffer(i), mesh, i, 0);
+                else
+                    desc->bindDescriptors(grid->commandBuffer(i), mesh, i, 1);
+
+                vkCmdBindVertexBuffers(grid->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
+                vkCmdBindIndexBuffer(grid->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+                if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
+                    vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(0));
+                else if (mesh->tag == "Skybox")
+                    vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(1));
+                else if (mesh->tag == "Quad")
+                    vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(3));
+                else
+                    vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(2));
+
+                vkCmdDrawIndexed(grid->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
+            }
+
+            grid->endPass(i);
+            hw::loc::cmd()->endBuffer(grid->commandBuffer(i));
         }
     }
 
@@ -681,7 +738,7 @@ private:
                 vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
                 vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                if (mesh->tag == "Chalet")
+                if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(0));
                 else if (mesh->tag == "Skybox")
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(1));
@@ -752,6 +809,8 @@ private:
                 UserSimulationInput usi = {};
                 usi.mouse = glm::vec4(0.0f);
                 usi.mouse.z = (camera->mousePressed) ? 1.0f : 0.0f;
+                usi.mouse.x = camera->mousePosition.x;
+                usi.mouse.y = camera->mousePosition.y;
 
                 void* data;
                 hw::loc::device()->map(desc->getUniMemory(mesh, currentImage, 0), sizeof(usi), data);
@@ -816,6 +875,9 @@ private:
 
         updateUniformBuffer(imageIndex);
         camera->processInput();
+        if (camera->gridMode) {
+            gridMode = !gridMode;
+        }
 
         // Sync to GPU
         if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
@@ -852,14 +914,25 @@ private:
         }
 
         {
-            std::vector<VkCommandBuffer> submitCommandBuffers = {
-                refraction->commandBuffer(imageIndex),
-                reflection->commandBuffer(imageIndex),
-                water->commandBuffer(imageIndex),
-            #ifdef IMGUI_ON
-                imgui->getCommandBuffer(imageIndex),
-            #endif
-            };
+            std::vector<VkCommandBuffer> submitCommandBuffers;
+            if (gridMode)
+                submitCommandBuffers = {
+                    refraction->commandBuffer(imageIndex),
+                    reflection->commandBuffer(imageIndex),
+                    grid->commandBuffer(imageIndex),
+                #ifdef IMGUI_ON
+                    imgui->getCommandBuffer(imageIndex),
+                #endif
+                };
+            else
+                submitCommandBuffers = {
+                    refraction->commandBuffer(imageIndex),
+                    reflection->commandBuffer(imageIndex),
+                    water->commandBuffer(imageIndex),
+                #ifdef IMGUI_ON
+                    imgui->getCommandBuffer(imageIndex),
+                #endif
+                };
 
             VkSemaphore waitSemaphores[] = { computeFinishedSemaphores[currentFrame] };
             VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };

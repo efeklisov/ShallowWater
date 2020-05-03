@@ -18,8 +18,8 @@ void main() {
         return;
 
     if (usi.mouse.z > 0.0) {
-        if ((gl_GlobalInvocationID.x >= WIDTH / 2 - 1) && (gl_GlobalInvocationID.x <= WIDTH / 2 + 1) 
-                && (gl_GlobalInvocationID.y >= HEIGHT / 2 - 1) && (gl_GlobalInvocationID.y <= HEIGHT / 2 + 1)) {
+        if ((gl_GlobalInvocationID.x >= (usi.mouse.x * 1024) - 2) && (gl_GlobalInvocationID.x <= (usi.mouse.x * 1024) + 2) 
+                && (gl_GlobalInvocationID.y >= (usi.mouse.y * 1024) - 2) && (gl_GlobalInvocationID.y <= (usi.mouse.y * 1024) + 2)) {
 
             imageStore(nextImage, ivec2(gl_GlobalInvocationID.xy), vec4(-2.0));
             return;

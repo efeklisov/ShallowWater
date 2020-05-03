@@ -72,12 +72,6 @@ public:
         return swapChainImageViews[index];
     }
 
-    VkFramebuffer& frameBuffer(uint32_t index)
-    {
-        return swapChainFramebuffers[index];
-    }
-
-
     VkImageView& depthView(uint32_t index)
     {
         return depthImageViews[index];

@@ -11,10 +11,13 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include <iostream>
+
 class Camera {
     public:
         Camera(GLFWwindow *_window, float _width, float _height) : window(_window), lastX(_width / 2), lastY(_height / 2) { 
             pitch = - glm::pi<float>();
+            yaw = - glm::pi<float>() / 2;
             update(0);
         }
 
@@ -70,9 +73,29 @@ class Camera {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                 glfwSetCursorPosCallback(window, nullptr);
             }
-            if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS) {
-                mousePressed = true;
-            } else mousePressed = false;
+            if ((glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) && (gridHold != true)) {
+                gridHold = true;
+                gridMode = true;
+            } else gridMode = false;
+            
+            if (glfwGetKey(window, GLFW_KEY_R) == GLFW_RELEASE) {
+                gridHold = false;
+            }
+
+            if (mousePressed) {
+                if (glm::abs(cameraFront.y) > 0.00001f) {
+                    float t = (1 - cameraPos.y + 1) / cameraFront.y;
+                    mousePosition.x = cameraPos.x + cameraFront.x * t;
+                    mousePosition.x *= -1;
+                    mousePosition.y = cameraPos.z + cameraFront.z * t;
+
+                    if ((glm::abs(mousePosition.x)) < 6 && (glm::abs(mousePosition.y + 2.0f) < 5)) {
+                        mousePressed = true;
+                        mousePosition.x = (mousePosition.x + 6.0f) / 12.0f;
+                        mousePosition.y = (mousePosition.y + 2.0f + 5.0f) / 10.0f;
+                    }
+                }
+            }
         }
 
         glm::vec3 distance(glm::vec3& _cameraPos) {
@@ -99,12 +122,21 @@ class Camera {
             pitch += yoffset * deltaTime;
         }
 
+        void mouseButton(int button, int action) {
+            if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
+                mousePressed = true;
+            else mousePressed = false;
+        }
+
         glm::mat4 view;
         glm::mat4 viewI;
         glm::mat4 proj;
-        glm::vec3 cameraPos = glm::vec3(0.0f, 4.f, -7.0f);
+        glm::vec3 cameraPos = glm::vec3(6.0f, 4.f, -1.0f);
 
+        bool gridMode = false;
         bool mousePressed = false;
+        bool gridHold = false;
+
         glm::vec2 mousePosition = glm::vec2(0.0f, 0.0f);
 
     private:
