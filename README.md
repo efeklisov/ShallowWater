@@ -16,13 +16,13 @@ make
 ```
 ## Shaders 🖌️
 
-You need to install `parallel` from your repository and run 
+You need to install `parallel` from your repository and execute 
 
 ```../recompile_shader.sh```
 
 ## Run 🏃‍♀️
 
-To run the programm unzip `grid.obj` in `build/models` and execute
+To run the program unzip `grid.obj` in `build/models` and run
 
 ```./engine```
 
