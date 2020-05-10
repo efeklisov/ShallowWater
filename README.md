@@ -4,6 +4,28 @@ My attempts at Vulkan programming based on examples by [Overv](https://github.co
 
 ![Preview](preview.png)
 
+# Installation 📲
+
+## Compilation 🏭
+
+```
+mkdir build
+cd build
+cmake ..
+make
+```
+## Shaders 🖌️
+
+You need to install `parallel` from your repository and execute 
+
+```../recompile_shader.sh```
+
+## Run 🏃‍♀️
+
+To run the program unzip `grid.obj` in `build/models` and run
+
+```./engine```
+
 # Controls 🕹️
 
 - **WASD+mouse** - 3D movement
