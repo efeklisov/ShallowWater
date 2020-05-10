@@ -215,7 +215,7 @@ private:
         desc->addMesh("Chalet", {0}, "models/chalet.obj", new Texture("textures/chalet.jpg"), {4.3f, 1.8f, 4.8f}, {-PI / 2, 0.0f, 0.0f});
         desc->addMesh("Lake", {0}, "models/lake.obj", new Texture("textures/lake.png"));
         desc->addMesh("Football", {0}, "models/football.obj", new Texture("textures/football.png"), {-1.0f, -1.5f, 0.0f}, {0.3, PI, -PI / 12}, {0.7f, 0.7f, 0.7f});
-        desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, -2.0f}, {0.0f, 0.0f, 0.0f}, {10.0f, 1.0f, 12.0f});
+        desc->addMesh("Quad", {0, 1}, "models/grid.obj", nullptr, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {10.0f, 1.0f, 10.0f});
         desc->addMesh("Simulation", {2});
         desc->allocate();
 
@@ -652,7 +652,7 @@ private:
                     desc->bindDescriptors(water->commandBuffer(i), mesh, i, 1);
 
                 vkCmdBindVertexBuffers(water->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                /* vkCmdBindIndexBuffer(water->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32); */
 
                 if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(0));
@@ -663,7 +663,8 @@ private:
                 else
                     vkCmdBindPipeline(water->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, water->pipeline(2));
 
-                vkCmdDrawIndexed(water->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
+                /* vkCmdDrawIndexed(water->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0); */
+                vkCmdDraw(water->commandBuffer(i), mesh->vertex.size, 1, mesh->vertex.start, 0);
             }
 
             water->endPass(i);
@@ -694,7 +695,7 @@ private:
                     desc->bindDescriptors(grid->commandBuffer(i), mesh, i, 1);
 
                 vkCmdBindVertexBuffers(grid->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(grid->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                /* vkCmdBindIndexBuffer(grid->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32); */
 
                 if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
                     vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(0));
@@ -705,7 +706,8 @@ private:
                 else
                     vkCmdBindPipeline(grid->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, grid->pipeline(2));
 
-                vkCmdDrawIndexed(grid->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
+                /* vkCmdDrawIndexed(grid->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0); */
+                vkCmdDraw(grid->commandBuffer(i), mesh->vertex.size, 1, mesh->vertex.start, 0);
             }
 
             grid->endPass(i);
@@ -736,7 +738,7 @@ private:
 
                 desc->bindDescriptors(refraction->commandBuffer(i), mesh, i, 0);
                 vkCmdBindVertexBuffers(refraction->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                /* vkCmdBindIndexBuffer(refraction->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32); */
 
                 if ((mesh->tag == "Chalet") || (mesh->tag == "Football"))
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(0));
@@ -745,7 +747,8 @@ private:
                 else
                     vkCmdBindPipeline(refraction->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, refraction->pipeline(2));
 
-                vkCmdDrawIndexed(refraction->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
+                /* vkCmdDrawIndexed(refraction->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0); */
+                vkCmdDraw(refraction->commandBuffer(i), mesh->vertex.size, 1, mesh->vertex.start, 0);
             }
 
             refraction->endPass(i);
@@ -777,7 +780,7 @@ private:
 
                 desc->bindDescriptors(reflection->commandBuffer(i), mesh, i, 0);
                 vkCmdBindVertexBuffers(reflection->commandBuffer(i), 0, 1, &vertexBuffer, offsets);
-                vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                /* vkCmdBindIndexBuffer(reflection->commandBuffer(i), indexBuffer, 0, VK_INDEX_TYPE_UINT32); */
 
                 if (mesh->tag == "Chalet")
                     vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(0));
@@ -786,7 +789,8 @@ private:
                 else
                     vkCmdBindPipeline(reflection->commandBuffer(i), VK_PIPELINE_BIND_POINT_GRAPHICS, reflection->pipeline(2));
 
-                vkCmdDrawIndexed(reflection->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0);
+                /* vkCmdDrawIndexed(reflection->commandBuffer(i), mesh->vertex.size, 1, 0, mesh->vertex.start, 0); */
+                vkCmdDraw(reflection->commandBuffer(i), mesh->vertex.size, 1, mesh->vertex.start, 0);
             }
 
             reflection->endPass(i);

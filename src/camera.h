@@ -91,8 +91,8 @@ class Camera {
 
                     if ((glm::abs(mousePosition.x)) < 6 && (glm::abs(mousePosition.y + 2.0f) < 5)) {
                         mousePressed = true;
-                        mousePosition.x = (mousePosition.x + 6.0f) / 12.0f;
-                        mousePosition.y = (mousePosition.y + 2.0f + 5.0f) / 10.0f;
+                        mousePosition.x = (mousePosition.x + 5.0f) / 10.0f;
+                        mousePosition.y = (mousePosition.y + 5.0f) / 10.0f;
                     }
                 }
             }

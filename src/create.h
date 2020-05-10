@@ -10,8 +10,8 @@
 #include "command.h"
 #include "image.h"
 
-namespace create {
-    void buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+struct create {
+    static void buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;
@@ -33,7 +33,7 @@ namespace create {
         hw::loc::device()->bind(buffer, bufferMemory);
     }
 
-    VkImageView imageView(VkImage& image, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB, VkImageAspectFlags aspectFlags=VK_IMAGE_ASPECT_COLOR_BIT, int layerCount=1, VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D) {
+    static VkImageView imageView(VkImage& image, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB, VkImageAspectFlags aspectFlags=VK_IMAGE_ASPECT_COLOR_BIT, int layerCount=1, VkImageViewType viewType=VK_IMAGE_VIEW_TYPE_2D) {
         VkImageViewCreateInfo viewInfo = {};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
@@ -51,7 +51,7 @@ namespace create {
         return imageView;
     }
 
-    void sampler(VkSampler& sampler, VkSamplerAddressMode addressMode=VK_SAMPLER_ADDRESS_MODE_REPEAT) {
+    static void sampler(VkSampler& sampler, VkSamplerAddressMode addressMode=VK_SAMPLER_ADDRESS_MODE_REPEAT) {
         VkSamplerCreateInfo samplerInfo = {};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -70,7 +70,7 @@ namespace create {
         hw::loc::device()->create(samplerInfo, sampler);
     }
 
-    void vertexBuffer(std::vector<Vertex>& vertices, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+    static void vertexBuffer(std::vector<Vertex>& vertices, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
         VkBuffer stagingBuffer;
@@ -92,7 +92,7 @@ namespace create {
         hw::loc::device()->free(stagingBufferMemory);
     }
 
-    void indexBuffer(std::vector<uint32_t>& indeces, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+    static void indexBuffer(std::vector<uint32_t>& indeces, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
         VkDeviceSize bufferSize = sizeof(indeces[0]) * indeces.size();
 
         VkBuffer stagingBuffer;
@@ -114,7 +114,7 @@ namespace create {
         hw::loc::device()->free(stagingBufferMemory);
     }
 
-    void cubemap(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+    static void cubemap(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
         VkImageCreateInfo imageInfo = {};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -147,7 +147,7 @@ namespace create {
         hw::loc::device()->bind(image, imageMemory);
     }
 
-    void staging(std::string_view filename, VkBuffer& stagingBuffer, VkDeviceMemory& stagingBufferMemory) {
+    static void staging(std::string_view filename, VkBuffer& stagingBuffer, VkDeviceMemory& stagingBufferMemory) {
         stbi_ldr_to_hdr_gamma(1.0f);
 
         int texWidth, texHeight, texChannels;
@@ -169,7 +169,7 @@ namespace create {
 
     }
 
-    void image(uint32_t width, uint32_t height, VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& imageMemory, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB) {
+    static void image(uint32_t width, uint32_t height, VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& imageMemory, VkFormat format=VK_FORMAT_R8G8B8A8_SRGB) {
         VkImageCreateInfo imageInfo = {};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -199,4 +199,4 @@ namespace create {
 
         hw::loc::device()->bind(image, imageMemory);
     }
-}
+};

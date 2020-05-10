@@ -64,8 +64,7 @@ namespace read {
         indices.insert(indices.end(), _indices.begin(), _indices.end());
     }
 
-    void model(std::string_view filename, std::vector<Vertex>& vertices, 
-            std::vector<uint32_t>& indices) {
+    void model(std::string_view filename, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
@@ -143,8 +142,7 @@ namespace read {
     /*     } */
     /* } */
 
-    void model(std::string_view filename, std::vector<Vertex>& vertices,
-            std::vector<uint32_t>& indices, uint32_t& start, uint32_t& size) {
+    void model(std::string_view filename, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, uint32_t& start, uint32_t& size) {
 
         std::vector<Vertex> _vertices;
         std::vector<uint32_t> _indices;
